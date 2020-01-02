@@ -11,14 +11,22 @@ import argparse
 import re
 from typing import Dict, List
 nlp = spacy.load("en_core_web_sm", disable = ['parser', 'ner'])
-log_file = open('../logs/debug.log', 'w', encoding='utf8')
+from Stemmer import PorterStemmer
+stemmer = PorterStemmer()
 
 
-def lemmatize(phrase: str) -> (List[str], str):
+def lemmatize(phrase: str) -> str:
     phrase = re.sub('_', ' ', phrase)
     doc = nlp(phrase)
     lemma_list = [token.lemma_ if token.lemma_ != '-PRON-' else token.text for token in doc]
     return '_'.join(lemma_list)
+
+
+def stem(phrase: str):
+    stem_list = []
+    for token in phrase.split('_'):
+        stem_list.append(stemmer.stem(token))
+    return '_'.join(stem_list)
 
 
 def get_relations(rel_filepath: str) -> Dict:
@@ -43,16 +51,17 @@ def get_pos(concept: str) -> (str, str):
     else:
         return concept, '-'
 
+
 def build_graph(opt):
     """
     Build a directional graph from csv for ConceptNet.
     Concepts are lemmatized before registering as nodes.
     """
     rel_dict = get_relations(opt.relation)
-    fout = open(opt.output, 'w', encoding='utf8')
     with open(opt.cpnet, 'r', encoding='utf8') as fin:
         cp_lines = fin.readlines()
 
+    fout = open(opt.output, 'w', encoding='utf8')
     print('Start transforming...')
     for line in tqdm(cp_lines):
 
@@ -68,8 +77,10 @@ def build_graph(opt):
         # subj = lemmatize(subj)
         # obj = lemmatize(obj)
 
+        # subj = stem(subj)
+        # obj = stem(obj)
+
         if subj == obj:
-            print(line, file=log_file)
             continue
 
         if rel == 'relatedto' or rel == 'antonym':
@@ -85,6 +96,10 @@ if __name__ == "__main__":
     parser.add_argument('-cpnet', type=str, default='./ConceptNet-en.csv', help='path to the english conceptnet')
     parser.add_argument('-relation', type=str, default='./relation_direction.txt', help='file that specifies the valid relations')
     parser.add_argument('-output', type=str, default='./ConceptNet-en.pruned.txt', help='path to store the generated graph')
+    parser.add_argument('-override', default=False, action='store_true', help='if specified, -output will be the same with -cpnet')
     opt = parser.parse_args()
+
+    if opt.override:
+        opt.output = opt.cpnet
     build_graph(opt)
 
