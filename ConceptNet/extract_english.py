@@ -74,7 +74,7 @@ def extract_english(opt):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-conceptnet', type=str, default='./ConceptNet.csv', help='the downloaded conceptnet file')
+    parser.add_argument('-cpnet', type=str, default='./ConceptNet.csv', help='the downloaded conceptnet file')
     parser.add_argument('-output', type=str, default='./ConceptNet-en.csv', help='the path to store output data')
     opt = parser.parse_args()
 
