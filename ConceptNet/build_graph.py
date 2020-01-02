@@ -8,6 +8,7 @@ import networkx as nx
 from tqdm import tqdm
 import spacy
 import argparse
+import re
 from typing import Dict, List
 nlp = spacy.load("en_core_web_sm", disable = ['parser', 'ner'])
 from spacy.lang.en.stop_words import STOP_WORDS
@@ -17,7 +18,7 @@ log_file = open('../logs/debug.log', 'w', encoding='utf8')
 
 
 def lemmatize(phrase: str) -> (List[str], str):
-    phrase = phrase.strip().split('_')
+    phrase = re.sub('_', ' ', phrase)
     doc = nlp(phrase)
     lemma_list = [token.lemma_ if token.lemma_ != '-PRON-' else token.text for token in doc]
     return '_'.join(lemma_list)
@@ -102,8 +103,8 @@ def build_graph(opt):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-cpnet', type='str', default='./ConceptNet-en.csv', help='path to the english conceptnet')
-    parser.add_argument('-relation', type='str', default='./relation_direction.txt', help='file that specifies the valid relations')
+    parser.add_argument('-cpnet', type=str, default='./ConceptNet-en.csv', help='path to the english conceptnet')
+    parser.add_argument('-relation', type=str, default='./relation_direction.txt', help='file that specifies the valid relations')
     parser.add_argument('-output', type=str, default='./ConceptNet-en.graph', help='path to store the generated graph')
     opt = parser.parse_args()
     build_graph(opt)
