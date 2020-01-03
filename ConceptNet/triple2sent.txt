@@ -1,0 +1,32 @@
+hasproperty: A has property B
+distinctfrom: A is distinct from B
+capableof: A is capable of B
+receivesaction: A can be B
+isa: A is a type of B
+atlocation: A is at location B
+hassubevent: A has subevent B
+instanceof: A is an example of B
+hasprerequisite: B is a dependency of A
+symbolof: A is a symbol of B
+entails: if A happen, B also happen
+hasfirstsubevent: B is first subevent of A
+hasa: B is part of A
+createdby: B can create A
+derivedfrom: A is derived from B
+madeof: A is made of B
+hascontext: A has context B
+desires: A desires B
+usedfor: A is used for B
+locatednear: A is located near B
+definedas: A is defined as B
+notcapableof: A is not capable of B
+similarto: A is similar to B
+antonym: A is opposite to B
+nothasproperty: A does not have property B
+mannerof: A is a manner of B
+synonym: A is similar to B
+notdesires: A does not desire B
+partof: A is part of B
+relatedto: A has relation with B
+haslastsubevent: B is last subevent of A
+causes: A can cause B
