@@ -9,10 +9,11 @@ from tqdm import tqdm
 import argparse
 import re
 from typing import List, Dict, Set
-import nltk
-nltk.download('stopwords')
-nltk_stopwords = nltk.corpus.stopwords.words('english')
-nltk_stopwords += ["like", "gone", "did", "going", "would", "could", "get", "in", "up", "may"]
+# import nltk
+# nltk.download('stopwords')
+# nltk_stopwords = nltk.corpus.stopwords.words('english')
+# nltk_stopwords += ["like", "gone", "did", "going", "would", "could", "get", "in", "up", "may"]
+from spacy.lang.en import STOP_WORDS
 from Stemmer import PorterStemmer
 stemmer = PorterStemmer()
 
@@ -21,6 +22,7 @@ def stem(word: str) -> str:
     """
     Stem a single word
     """
+    word = word.strip()
     return stemmer.stem(word)
 
 
@@ -41,7 +43,7 @@ def extract_context(paragraph) -> Set[str]:
     Acquire all content words from a paragraph.
     """
     paragraph = paragraph.lower().strip().split()
-    return {word for word in paragraph if word not in nltk_stopwords}
+    return {word for word in paragraph if word not in STOP_WORDS and word.isalpha()}
 
 
 def valid_direction(relation: str, direction: str, rel_rules: Dict[str, str]) -> bool:
@@ -69,7 +71,8 @@ def select_triple(entity: str, raw_triples: List[str], context_set: Set[str], re
         rel_rules - selection rules for each relation type (subj only, or both subj and obj?)
     """
     selected_triples = []
-    stem_context = set(map(stem, context_set))
+    entity = set(map(stem, entity.split(';')))
+    stem_context = set(map(stem, context_set)) - entity
 
     for line in raw_triples:
 
