@@ -8,13 +8,9 @@ import json
 from tqdm import tqdm
 import spacy
 import argparse
-import re
+import os
 from typing import Dict, List
 nlp = spacy.load("en_core_web_sm", disable = ['parser', 'ner'])
-import nltk
-nltk.download('stopwords')
-nltk_stopwords = nltk.corpus.stopwords.words('english')
-nltk_stopwords += ["like", "gone", "did", "going", "would", "could", "get", "in", "up", "may"]
 from Stemmer import PorterStemmer
 stemmer = PorterStemmer()
 
@@ -57,21 +53,21 @@ def match(entity_name: str, concept_name: str) -> bool:
 
 
 
-def related(entity: str, line: List[str]) -> bool:
+def related(entity: str, triple: List[str]):
     """
     Check whether a given ConceptNet triple is related to this entity.
     """
-    assert len(line) == 8
-    stem_subj, stem_obj = line[1], line[4]
-    subj_pos, obj_pos = line[3], line[6]
+    assert len(triple) == 8
+    stem_subj, stem_obj = triple[1], triple[4]
+    subj_pos, obj_pos = triple[3], triple[6]
 
     if match(entity_name=entity, concept_name=stem_subj) and subj_pos in ['n', '-']:
-        return True
+        return 'LEFT'
 
     if match(entity_name=entity, concept_name=stem_obj) and obj_pos in ['n', '-']:
-        return True
+        return 'RIGHT'
 
-    return False
+    return None
 
 
 def search_triple(entity: str) -> List:
@@ -81,9 +77,11 @@ def search_triple(entity: str) -> List:
     triple_list = []
 
     for line in cpnet:
-        line = line.strip().split('\t')
-        if related(entity = stem_entity, line = line):
-            triple_list.append(line)
+        triple = line.strip().split('\t')
+        match_result = related(entity = stem_entity, triple = triple)
+        if match_result is not None:
+            triple.append(match_result)
+            triple_list.append(', '.join(triple))
 
     return triple_list
 
@@ -122,6 +120,11 @@ def retrieve(datapath: str) -> (List, int):
 
 
 if __name__ == '__main__':
+
+    # if os.path.exists(opt.output):
+    #     result = json.load(open(opt.output, 'r', encoding='utf8'))
+    # else:
+    #     result = []
     result = []
 
     print('Dev')
