@@ -77,16 +77,16 @@ def build_graph(opt):
         # subj = lemmatize(subj)
         # obj = lemmatize(obj)
 
-        # subj = stem(subj)
-        # obj = stem(obj)
+        stem_subj = stem(subj)
+        stem_obj = stem(obj)
 
-        if subj == obj:
+        if stem_subj == stem_obj:
             continue
 
         if rel == 'relatedto' or rel == 'antonym':
             weight -= 0.3
 
-        fout.write('\t'.join([rel, subj, subj_pos, obj, obj_pos, str(weight)]) + '\n')
+        fout.write('\t'.join([rel, stem_subj, subj, subj_pos, stem_obj, obj, obj_pos, str(weight)]) + '\n')
 
     print('Finshed.')
 

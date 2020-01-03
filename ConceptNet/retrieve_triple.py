@@ -22,15 +22,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-train', type=str, default='../data/train.json', help='path to the training set')
 parser.add_argument('-dev', type=str, default='../data/dev.json', help='path to the dev set')
 parser.add_argument('-test', type=str, default='../data/test.json', help='path to the test set')
-parser.add_argument('-cpnet', type=str, default='ConceptNet-en.csv', help='path to ConceptNet triples')
+parser.add_argument('-cpnet', type=str, default='ConceptNet-en.pruned.txt', help='path to ConceptNet triples')
 parser.add_argument('-output', type=str, default='./rough_retrieval.txt', help='file to store the output text')
 opt = parser.parse_args()
 
 with open(opt.cpnet, 'r', encoding='utf-8') as fin:
     cpnet = fin.readlines()
-
-result = []
-triple_cnt = 0
 
 
 def stem(word: str) -> str:
@@ -43,16 +40,17 @@ def stem(word: str) -> str:
 def match(entity_name: str, concept_name: str) -> bool:
     """
     Check whether a given concept matches with this entity.
+    entity_name and concept_name should be the form after stemming.
     """
     entity = entity_name.split()
     concept = concept_name.split('_')
 
     if len(entity) == 1:  # single word
-        return len(concept) == 1 and stem(concept[0]) == stem(entity[0])
+        return len(concept) == 1 and concept[0] == entity[0]
 
     # multiple words
-    concept = set(map(stem, concept))
-    entity = set(map(stem, entity))
+    concept = set(concept)
+    entity = set(entity)
     common_words = len(concept.intersection(entity))
     total_words = len(concept.union(entity))
     return common_words / total_words >= 0.5
@@ -63,14 +61,14 @@ def related(entity: str, line: List[str]) -> bool:
     """
     Check whether a given ConceptNet triple is related to this entity.
     """
-    assert len(line) == 6
-    subj, obj = line[1], line[3]
-    subj_pos, obj_pos = line[2], line[4]
+    assert len(line) == 8
+    stem_subj, stem_obj = line[1], line[4]
+    subj_pos, obj_pos = line[3], line[6]
 
-    if match(entity, subj) and subj_pos in ['n', '-']:
+    if match(entity_name=entity, concept_name=stem_subj) and subj_pos in ['n', '-']:
         return True
 
-    if match(entity, obj) and obj_pos in ['n', '-']:
+    if match(entity_name=entity, concept_name=stem_obj) and obj_pos in ['n', '-']:
         return True
 
     return False
@@ -79,17 +77,18 @@ def related(entity: str, line: List[str]) -> bool:
 def search_triple(entity: str) -> List:
     global cpnet
     entity = entity.strip()
+    stem_entity = ' '.join(map(stem, entity.split()))
     triple_list = []
 
     for line in cpnet:
         line = line.strip().split('\t')
-        if related(entity = entity, line = line):
+        if related(entity = stem_entity, line = line):
             triple_list.append(line)
 
     return triple_list
 
 
-def retrieve(datapath: str):
+def retrieve(datapath: str) -> (List, int):
     """
     Retrieve all possibly related triples from ConceptNet to the given entity. (rough retrieval)
     For entities with single
@@ -97,7 +96,8 @@ def retrieve(datapath: str):
         datapath - path to the input dataset
         fout - file object to store output
     """
-    global result, triple_cnt
+    triple_cnt = 0
+    result = []
     dataset = json.load(open(datapath, 'r', encoding='utf8'))
 
     for instance in tqdm(dataset):
@@ -118,15 +118,32 @@ def retrieve(datapath: str):
                        'cpnet': triples
                        })
 
+    return result, triple_cnt
+
 
 if __name__ == '__main__':
-    print('Dev')
-    retrieve(opt.dev)
-    print('Test')
-    retrieve(opt.test)
-    print('Train')
-    retrieve(opt.train)
 
+    print('Dev')
+    fout = open(opt.output, 'w', encoding='utf-8')
+    result, triple_cnt = retrieve(opt.dev)
+    json.dump(result, fout, indent=4, ensure_ascii=False)
+    fout.close()
     print(f'{len(result)} data instances acquired.')
     print(f'Average number of ConceptNet triples found: {triple_cnt / len(result)}')
-    json.dump(result, open(opt.output, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
+
+    print('Test')
+    fout = open(opt.output, 'a', encoding='utf-8')
+    result, triple_cnt = retrieve(opt.test)
+    json.dump(result, fout, indent=4, ensure_ascii=False)
+    fout.close()
+    print(f'{len(result)} data instances acquired.')
+    print(f'Average number of ConceptNet triples found: {triple_cnt / len(result)}')
+
+    print('Train')
+    fout = open(opt.output, 'a', encoding='utf-8')
+    result, triple_cnt = retrieve(opt.train)
+    json.dump(result, fout, indent=4, ensure_ascii=False)
+    fout.close()
+    print(f'{len(result)} data instances acquired.')
+    print(f'Average number of ConceptNet triples found: {triple_cnt / len(result)}')
+

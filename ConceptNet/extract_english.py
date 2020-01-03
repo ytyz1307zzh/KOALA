@@ -32,7 +32,7 @@ def extract_english(opt):
     fout = open(opt.output, "w", encoding="utf8")
 
     start_time = time.time()
-    fin = open(opt.conceptnet, 'r', encoding="utf8")
+    fin = open(opt.cpnet, 'r', encoding="utf8")
     lines = fin.readlines()
     print(f'File read time: {time.time() - start_time:.2f}s')
 
