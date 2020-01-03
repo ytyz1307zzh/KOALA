@@ -122,28 +122,32 @@ def retrieve(datapath: str) -> (List, int):
 
 
 if __name__ == '__main__':
+    result = []
 
     print('Dev')
-    fout = open(opt.output, 'w', encoding='utf-8')
-    result, triple_cnt = retrieve(opt.dev)
+    fout = open(opt.output, 'w', encoding='utf-8')  # write a new file
+    dev_result, triple_cnt = retrieve(opt.dev)
+    result.extend(dev_result)
     json.dump(result, fout, indent=4, ensure_ascii=False)
     fout.close()
-    print(f'{len(result)} data instances acquired.')
-    print(f'Average number of ConceptNet triples found: {triple_cnt / len(result)}')
+    print(f'{len(dev_result)} data instances acquired.')
+    print(f'Average number of ConceptNet triples found: {triple_cnt / len(dev_result)}')
 
     print('Test')
-    fout = open(opt.output, 'a', encoding='utf-8')
-    result, triple_cnt = retrieve(opt.test)
+    fout = open(opt.output, 'w', encoding='utf-8')  # append to previous lines
+    test_result, triple_cnt = retrieve(opt.test)
+    result.extend(test_result)
     json.dump(result, fout, indent=4, ensure_ascii=False)
     fout.close()
-    print(f'{len(result)} data instances acquired.')
-    print(f'Average number of ConceptNet triples found: {triple_cnt / len(result)}')
+    print(f'{len(test_result)} data instances acquired.')
+    print(f'Average number of ConceptNet triples found: {triple_cnt / len(test_result)}')
 
     print('Train')
-    fout = open(opt.output, 'a', encoding='utf-8')
-    result, triple_cnt = retrieve(opt.train)
+    fout = open(opt.output, 'w', encoding='utf-8')
+    train_result, triple_cnt = retrieve(opt.train)
+    result.extend(train_result)
     json.dump(result, fout, indent=4, ensure_ascii=False)
     fout.close()
-    print(f'{len(result)} data instances acquired.')
-    print(f'Average number of ConceptNet triples found: {triple_cnt / len(result)}')
+    print(f'{len(train_result)} data instances acquired.')
+    print(f'Average number of ConceptNet triples found: {triple_cnt / len(train_result)}')
 
