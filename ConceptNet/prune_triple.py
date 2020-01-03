@@ -162,8 +162,8 @@ if __name__ == "__main__":
         context_set = extract_context(paragraph)
         context_set.union(extract_context(topic))
 
-        selected_triples = select_triple(entity = entity, raw_triples = raw_triples, context_set = context_set,
-                                         rel_rules = rel_rules, max = opt.max)
+        selected_triples = select_triple(entity = entity, raw_triples = list(set(raw_triples)), context_set = context_set,
+                                         rel_rules = rel_rules, max = opt.max)  # raw_triples may contain repetitive fields (multiple entities)
         print(f'Triples before selection: {len(raw_triples)}, after selection: {len(selected_triples)}')
 
         result.append({'id': para_id,
