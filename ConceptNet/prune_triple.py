@@ -183,9 +183,9 @@ def select_triple(entity: str, raw_triples: List[str], context_set: Set[str], re
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-input', type=str, default='./rough_retrieval.txt', help='path to the english conceptnet')
+    parser.add_argument('-input', type=str, default='./rough_retrieval.json', help='path to the english conceptnet')
     parser.add_argument('-output', type=str, default='./retrieval.txt', help='path to store the generated graph')
-    parser.add_argument('-relation', type=str, default='./relation_direction.txt', help='path to the relation rules')
+    parser.add_argument('-relation', type=str, default='./relation_direction.json', help='path to the relation rules')
     parser.add_argument('-transform', type=str, default='./triple2sent.txt',
                         help='path to the file that describes the rules to transform triples into natural language')
     parser.add_argument('-max', type=int, default=20, help='how many triples to collect')

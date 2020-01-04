@@ -18,8 +18,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-train', type=str, default='../data/train.json', help='path to the training set')
 parser.add_argument('-dev', type=str, default='../data/dev.json', help='path to the dev set')
 parser.add_argument('-test', type=str, default='../data/test.json', help='path to the test set')
-parser.add_argument('-cpnet', type=str, default='ConceptNet-en.pruned.txt', help='path to ConceptNet triples')
-parser.add_argument('-output', type=str, default='./rough_retrieval.txt', help='file to store the output text')
+parser.add_argument('-cpnet', type=str, default='ConceptNet-en.pruned.csv', help='path to ConceptNet triples')
+parser.add_argument('-output', type=str, default='./rough_retrieval.json', help='file to store the output text')
 opt = parser.parse_args()
 
 with open(opt.cpnet, 'r', encoding='utf-8') as fin:

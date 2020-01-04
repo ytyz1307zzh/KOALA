@@ -13,6 +13,7 @@ from typing import Dict, List
 nlp = spacy.load("en_core_web_sm", disable = ['parser', 'ner'])
 from Stemmer import PorterStemmer
 stemmer = PorterStemmer()
+blacklist = {"uk", "us", "take", "make", "object", "person", "people"}
 
 
 def lemmatize(phrase: str) -> str:
@@ -74,6 +75,9 @@ def build_graph(opt):
         subj, subj_pos = get_pos(subj)
         obj, obj_pos = get_pos(obj)
 
+        if subj in blacklist or obj in blacklist:
+            continue
+
         # subj = lemmatize(subj)
         # obj = lemmatize(obj)
 
@@ -86,6 +90,9 @@ def build_graph(opt):
         if rel == 'relatedto' or rel == 'antonym':
             weight -= 0.3
 
+        if rel == 'atlocation':
+            weight += 0.5
+
         fout.write('\t'.join([rel, stem_subj, subj, subj_pos, stem_obj, obj, obj_pos, str(weight)]) + '\n')
 
     print('Finshed.')
@@ -95,7 +102,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-cpnet', type=str, default='./ConceptNet-en.csv', help='path to the english conceptnet')
     parser.add_argument('-relation', type=str, default='./relation_direction.txt', help='file that specifies the valid relations')
-    parser.add_argument('-output', type=str, default='./ConceptNet-en.pruned.txt', help='path to store the generated graph')
+    parser.add_argument('-output', type=str, default='./ConceptNet-en.pruned.csv', help='path to store the generated graph')
     parser.add_argument('-override', default=False, action='store_true', help='if specified, -output will be the same with -cpnet')
     opt = parser.parse_args()
 
