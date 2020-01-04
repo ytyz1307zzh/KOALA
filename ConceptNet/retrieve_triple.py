@@ -11,6 +11,8 @@ import argparse
 import os
 from typing import Dict, List
 nlp = spacy.load("en_core_web_sm", disable = ['parser', 'ner'])
+from spacy.lang.en import STOP_WORDS
+STOP_WORDS = set(STOP_WORDS) - {'bottom', 'serious', 'top', 'alone', 'around', 'used', 'behind', 'side', 'mine', 'well'}
 from Stemmer import PorterStemmer
 stemmer = PorterStemmer()
 
@@ -30,6 +32,7 @@ def stem(word: str) -> str:
     """
     Stem a single word
     """
+    word = word.lower().strip()
     return stemmer.stem(word)
 
 
@@ -45,8 +48,8 @@ def match(entity_name: str, concept_name: str) -> bool:
         return len(concept) == 1 and concept[0] == entity[0]
 
     # multiple words
-    concept = set(concept)
-    entity = set(entity)
+    concept = set(concept) - STOP_WORDS
+    entity = set(entity) - STOP_WORDS
     common_words = len(concept.intersection(entity))
     total_words = len(concept.union(entity))
     return common_words / total_words >= 0.5
@@ -71,6 +74,9 @@ def related(entity: str, triple: List[str]):
 
 
 def search_triple(entity: str) -> List:
+    """
+    Search matched triples in ConceptNet to the given entity.
+    """
     global cpnet
     entity = entity.strip()
     stem_entity = ' '.join(map(stem, entity.split()))

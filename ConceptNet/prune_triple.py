@@ -14,6 +14,7 @@ from typing import List, Dict, Set
 # nltk_stopwords = nltk.corpus.stopwords.words('english')
 # nltk_stopwords += ["like", "gone", "did", "going", "would", "could", "get", "in", "up", "may"]
 from spacy.lang.en import STOP_WORDS
+STOP_WORDS = set(STOP_WORDS) - {'bottom', 'serious', 'top', 'alone', 'around', 'used', 'behind', 'side', 'mine', 'well'}
 from Stemmer import PorterStemmer
 stemmer = PorterStemmer()
 
@@ -63,7 +64,7 @@ def read_transform(filename: str) -> Dict[str, str]:
     return trans_rules
 
 
-def extract_context(paragraph) -> Set[str]:
+def remove_stopword(paragraph: str) -> Set[str]:
     """
     Acquire all content words from a paragraph.
     """
@@ -167,28 +168,32 @@ def select_triple(entity: str, raw_triples: List[str], context_set: Set[str], re
 
     # retrieve at most max/2 relevance-based triples, the others are filled with score-based triples
     triples_by_relevance = [t for t in triples_by_relevance if get_weight(t) >= 1.0]
-    if len(triples_by_relevance) > (max//2):
-        triples_by_relevance = sorted(triples_by_relevance, key=lambda x: get_relation(x) != 'relatedto', reverse=True)
-        triples_by_relevance = sorted(triples_by_relevance, key=get_weight, reverse=True)
-        triples_by_relevance = triples_by_relevance[:max//2]
+    triples_by_relevance = sorted(triples_by_relevance, key=lambda x: get_relation(x) != 'relatedto', reverse=True)
+    triples_by_relevance = sorted(triples_by_relevance, key=get_weight, reverse=True)
+    if len(triples_by_relevance) > max:
+        triples_by_relevance = triples_by_relevance[:max]
 
+    triples_by_score = list(set(triples_by_score) - set(triples_by_relevance))
     triples_by_score = sorted(triples_by_score, key = lambda x: get_relation(x) != 'relatedto', reverse = True)
     triples_by_score = sorted(triples_by_score, key = get_weight, reverse = True)
     triples_by_score = triples_by_score[:(max - len(triples_by_relevance))]
     print('relevance: ', len(triples_by_relevance), end=', ')
     print('score: ', len(triples_by_score))
 
-    return triples_by_relevance + triples_by_score
+    result = triples_by_relevance + triples_by_score
+    assert len(set(result)) == len(result)  # no duplicate items
+
+    return result
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-input', type=str, default='./rough_retrieval.json', help='path to the english conceptnet')
-    parser.add_argument('-output', type=str, default='./retrieval.txt', help='path to store the generated graph')
-    parser.add_argument('-relation', type=str, default='./relation_direction.json', help='path to the relation rules')
+    parser.add_argument('-output', type=str, default='./retrieval.json', help='path to store the generated graph')
+    parser.add_argument('-relation', type=str, default='./relation_direction.txt', help='path to the relation rules')
     parser.add_argument('-transform', type=str, default='./triple2sent.txt',
                         help='path to the file that describes the rules to transform triples into natural language')
-    parser.add_argument('-max', type=int, default=20, help='how many triples to collect')
+    parser.add_argument('-max', type=int, default=10, help='how many triples to collect')
     opt = parser.parse_args()
 
     data = json.load(open(opt.input, 'r', encoding='utf8'))
@@ -203,8 +208,8 @@ if __name__ == "__main__":
         topic = instance['topic']
         raw_triples = instance['cpnet']
 
-        context_set = extract_context(paragraph)
-        context_set.union(extract_context(topic))
+        context_set = remove_stopword(paragraph)
+        context_set.union(remove_stopword(topic))
 
         selected_triples = select_triple(entity = entity, raw_triples = list(set(raw_triples)), context_set = context_set,
                                          rel_rules = rel_rules, max = opt.max)  # raw_triples may contain repetitive fields (multiple entities)
