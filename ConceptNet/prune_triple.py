@@ -125,7 +125,8 @@ def triple2sent(raw_triples: List[str], trans_rules: Dict[str, str]):
     return result
 
 
-def select_triple(entity: str, raw_triples: List[str], context_set: Set[str], rel_rules: Dict[str, str], max: int) -> List[str]:
+def select_triple(entity: str, raw_triples: List[str], context_set: Set[str],
+                  rel_rules: Dict[str, str], max: int) -> (List[str], int, int):
     """
     Select related triples from the rough retrieval set.
     Args:
@@ -177,13 +178,11 @@ def select_triple(entity: str, raw_triples: List[str], context_set: Set[str], re
     triples_by_score = sorted(triples_by_score, key = lambda x: get_relation(x) != 'relatedto', reverse = True)
     triples_by_score = sorted(triples_by_score, key = get_weight, reverse = True)
     triples_by_score = triples_by_score[:(max - len(triples_by_relevance))]
-    print('relevance: ', len(triples_by_relevance), end=', ')
-    print('score: ', len(triples_by_score))
 
     result = triples_by_relevance + triples_by_score
     assert len(set(result)) == len(result)  # no duplicate items
 
-    return result
+    return result, len(triples_by_relevance), len(triples_by_score)
 
 
 if __name__ == "__main__":
@@ -200,8 +199,9 @@ if __name__ == "__main__":
     rel_rules = read_relation(opt.relation)
     trans_rules = read_transform(opt.transform)
     result = []
+    less_cnt, total_relevance, total_score = 0, 0, 0
 
-    for instance in data:
+    for instance in tqdm(data):
         para_id = instance['id']
         entity = instance['entity']
         paragraph = instance['paragraph']
@@ -211,9 +211,15 @@ if __name__ == "__main__":
         context_set = remove_stopword(paragraph)
         context_set.union(remove_stopword(topic))
 
-        selected_triples = select_triple(entity = entity, raw_triples = list(set(raw_triples)), context_set = context_set,
-                                         rel_rules = rel_rules, max = opt.max)  # raw_triples may contain repetitive fields (multiple entities)
-        print(f'Triples before selection: {len(raw_triples)}, after selection: {len(selected_triples)}')
+        # raw_triples may contain repetitive fields (multiple entities)
+        selected_triples, num_relevance, num_score = select_triple(entity = entity, raw_triples = list(set(raw_triples)),
+                                                                   context_set = context_set, rel_rules = rel_rules, max = opt.max)
+
+        total_relevance += num_relevance
+        total_score += num_score
+
+        if len(selected_triples) < 10:
+            less_cnt += 1
 
         selected_triples = triple2sent(raw_triples = selected_triples, trans_rules = trans_rules)
 
@@ -225,4 +231,10 @@ if __name__ == "__main__":
                      })
 
     json.dump(result, open(opt.output, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
+
+    total_instances = len(result)
+    print(f'Total instances: {total_instances}')
+    print(f'Instances with less than 10 ConceptNet triples collected: {less_cnt} ({(less_cnt/total_instances)*100:.2f}%)')
+    print(f'Average number of relevance-based triples: {total_relevance / total_instances:.2f}')
+    print(f'Average number of score-based triples: {total_score / total_instances:.2f}')
     print(f'{len(result)} instances finished.')
