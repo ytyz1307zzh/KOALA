@@ -152,6 +152,10 @@ def select_triple(entity: str, raw_triples: List[str], context_set: Set[str],
         direction = triple[-1]  # LEFT or RIGHT
         relation = triple[0]  # relation type
 
+        # if relation == 'atlocation':
+        #     triple[-2] = str(float(triple[-2]) - 0.5)
+        #     line = ', '.join(triple)
+
         # if the semantic role of the entity (subj or obj) does not match, skip this
         if not valid_direction(relation = relation, direction = direction.lower(), rel_rules = rel_rules):
             continue

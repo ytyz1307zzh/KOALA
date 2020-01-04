@@ -11,6 +11,8 @@ import argparse
 import re
 from typing import Dict, List
 nlp = spacy.load("en_core_web_sm", disable = ['parser', 'ner'])
+from spacy.lang.en import STOP_WORDS
+STOP_WORDS = set(STOP_WORDS) - {'bottom', 'serious', 'top', 'alone', 'around', 'used', 'behind', 'side', 'mine', 'well'}
 from Stemmer import PorterStemmer
 stemmer = PorterStemmer()
 blacklist = {"uk", "us", "take", "make", "object", "person", "people"}
@@ -28,6 +30,12 @@ def stem(phrase: str):
     for token in phrase.split('_'):
         stem_list.append(stemmer.stem(token))
     return '_'.join(stem_list)
+
+
+def remove_stopword(phrase: str) -> str:
+    phrase = phrase.lower().strip().split('_')
+    word_list = [word for word in phrase if word not in STOP_WORDS and word.isalpha()]
+    return '_'.join(word_list)
 
 
 def get_relations(rel_filepath: str) -> Dict:
@@ -81,8 +89,8 @@ def build_graph(opt):
         # subj = lemmatize(subj)
         # obj = lemmatize(obj)
 
-        stem_subj = stem(subj)
-        stem_obj = stem(obj)
+        stem_subj = stem(remove_stopword(subj))
+        stem_obj = stem(remove_stopword(obj))
 
         if stem_subj == stem_obj:
             continue

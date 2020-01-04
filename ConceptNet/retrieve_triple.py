@@ -9,7 +9,7 @@ from tqdm import tqdm
 import spacy
 import argparse
 import os
-from typing import Dict, List
+from typing import Set, List
 nlp = spacy.load("en_core_web_sm", disable = ['parser', 'ner'])
 from spacy.lang.en import STOP_WORDS
 STOP_WORDS = set(STOP_WORDS) - {'bottom', 'serious', 'top', 'alone', 'around', 'used', 'behind', 'side', 'mine', 'well'}
@@ -36,6 +36,11 @@ def stem(word: str) -> str:
     return stemmer.stem(word)
 
 
+def remove_stopword(phrase: str) -> List[str]:
+    phrase = phrase.lower().strip().split()
+    return [word for word in phrase if word not in STOP_WORDS and word.isalpha()]
+
+
 def match(entity_name: str, concept_name: str) -> bool:
     """
     Check whether a given concept matches with this entity.
@@ -48,8 +53,8 @@ def match(entity_name: str, concept_name: str) -> bool:
         return len(concept) == 1 and concept[0] == entity[0]
 
     # multiple words
-    concept = set(concept) - STOP_WORDS
-    entity = set(entity) - STOP_WORDS
+    concept = set(concept)
+    entity = set(entity)
     common_words = len(concept.intersection(entity))
     total_words = len(concept.union(entity))
     return common_words / total_words >= 0.5
@@ -78,8 +83,8 @@ def search_triple(entity: str) -> List:
     Search matched triples in ConceptNet to the given entity.
     """
     global cpnet
-    entity = entity.strip()
-    stem_entity = ' '.join(map(stem, entity.split()))
+    entity = remove_stopword(entity)
+    stem_entity = ' '.join(map(stem, entity))
     triple_list = []
 
     for line in cpnet:
