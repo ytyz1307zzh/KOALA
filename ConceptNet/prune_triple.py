@@ -52,6 +52,17 @@ def read_relation(filename: str) -> Dict[str, str]:
     return rel_rules
 
 
+def read_transform(filename: str) -> Dict[str, str]:
+    file = open(filename, 'r', encoding='utf8')
+    trans_rules = {}
+
+    for line in file:
+        relation, sentence = line.strip().split(': ')
+        trans_rules[relation] = sentence.strip()
+
+    return trans_rules
+
+
 def extract_context(paragraph) -> Set[str]:
     """
     Acquire all content words from a paragraph.
@@ -82,6 +93,35 @@ def in_context(concept: Set, context: Set) -> bool:
     """
     score = len(concept.intersection(context)) / len(concept)
     return score >= 0.5
+
+
+def triple2sent(raw_triples: List[str], trans_rules: Dict[str, str]):
+    """
+    Turn the triples to natural language sentences.
+    """
+    result = []
+
+    for line in raw_triples:
+
+        triple = line.strip().split(', ')
+        assert len(triple) == 9
+
+        relation = triple[0]
+        subj = triple[2]
+        obj = triple[5]
+
+        # turn the delimiter from _ to space
+        subj = ' '.join(subj.split('_'))
+        obj = ' '.join(obj.split('_'))
+
+        sentence = trans_rules[relation]
+        sentence = re.sub('A', subj, sentence)
+        sentence = re.sub('B', obj, sentence)
+
+        triple.append(sentence)
+        result.append(', '.join(triple))
+
+    return result
 
 
 def select_triple(entity: str, raw_triples: List[str], context_set: Set[str], rel_rules: Dict[str, str], max: int) -> List[str]:
@@ -125,6 +165,7 @@ def select_triple(entity: str, raw_triples: List[str], context_set: Set[str], re
         if in_context(concept = neighbor, context = stem_context):
             triples_by_relevance.append(line)
 
+    # retrieve at most max/2 relevance-based triples, the others are filled with score-based triples
     triples_by_relevance = [t for t in triples_by_relevance if get_weight(t) >= 1.0]
     if len(triples_by_relevance) > (max//2):
         triples_by_relevance = sorted(triples_by_relevance, key=lambda x: get_relation(x) != 'relatedto', reverse=True)
@@ -145,11 +186,14 @@ if __name__ == "__main__":
     parser.add_argument('-input', type=str, default='./rough_retrieval.txt', help='path to the english conceptnet')
     parser.add_argument('-output', type=str, default='./retrieval.txt', help='path to store the generated graph')
     parser.add_argument('-relation', type=str, default='./relation_direction.txt', help='path to the relation rules')
+    parser.add_argument('-transform', type=str, default='./triple2sent.txt',
+                        help='path to the file that describes the rules to transform triples into natural language')
     parser.add_argument('-max', type=int, default=20, help='how many triples to collect')
     opt = parser.parse_args()
 
     data = json.load(open(opt.input, 'r', encoding='utf8'))
     rel_rules = read_relation(opt.relation)
+    trans_rules = read_transform(opt.transform)
     result = []
 
     for instance in data:
@@ -165,6 +209,8 @@ if __name__ == "__main__":
         selected_triples = select_triple(entity = entity, raw_triples = list(set(raw_triples)), context_set = context_set,
                                          rel_rules = rel_rules, max = opt.max)  # raw_triples may contain repetitive fields (multiple entities)
         print(f'Triples before selection: {len(raw_triples)}, after selection: {len(selected_triples)}')
+
+        selected_triples = triple2sent(raw_triples = selected_triples, trans_rules = trans_rules)
 
         result.append({'id': para_id,
                      'entity': entity,
