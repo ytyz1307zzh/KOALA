@@ -182,6 +182,7 @@ class ConvertData2ParagraphClsInput(object):
 
         # Split and flatten documents. Maintain a mapping from doc (index in
         # flat list) to split (index in flat list).
+        # didx2sidx: List[doc_idx -> [split_idx_start, split_idx_end]]
         flat_splits = []
         didx2sidx = []
         for text in doc_texts:
