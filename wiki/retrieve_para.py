@@ -213,11 +213,11 @@ class ConvertData2ParagraphClsInput(object):
 
         para_examples = []
         distant_positive_num = 0
+        total_retrieval = 0
 
         for qidx in range(len(queries)):
             matched_para = []
             distant_num = 0
-            total_retrieval = 0
 
             for rel_didx, did in enumerate(all_docids[qidx]):
                 start, end = didx2sidx[did2didx[did]]
