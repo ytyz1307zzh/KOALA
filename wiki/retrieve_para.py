@@ -81,7 +81,26 @@ def has_answer(answer: str, para_text: str, tokenizer):
     return False
 
 
-def split_doc(docs: List[str]) -> (List[str], List[List[int]]):
+def _split_doc(doc):
+    """Given a doc, split it into chunks (by paragraph)."""
+    curr = []
+    curr_len = 0
+    for split in regex.split(r'\n+', doc):
+        split = split.strip()
+        if len(split) == 0:
+            continue
+        # Maybe group paragraphs together until we hit a length limit
+        if len(curr) > 0 and curr_len + len(split) > 0:
+            yield ' '.join(curr)
+            curr = []
+            curr_len = 0
+        curr.append(split)
+        curr_len += len(split)
+    if len(curr) > 0:
+        yield ' '.join(curr)
+
+
+def split_doc2sent(docs: List[str]) -> (List[str], List[List[int]]):
     """
     Split and flatten documents. Maintain a mapping from doc (index in
     flat list) to split (index in flat list).
@@ -187,7 +206,7 @@ class ConvertData2ParagraphClsInput(object):
         # Split and flatten documents. Maintain a mapping from doc (index in
         # flat list) to split (index in flat list).
         # didx2sidx: List[doc_idx -> [split_idx_start, split_idx_end]]
-        flat_splits, didx2sidx = split_doc(doc_texts)
+        flat_splits, didx2sidx = split_doc2sent(doc_texts)
         if len(flat_splits) != len(doc_texts):
             logger.info('{} doc texts are splited into {} splits'.format(len(doc_texts), len(flat_splits)))
 
