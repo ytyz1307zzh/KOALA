@@ -12,6 +12,7 @@ import argparse
 import logging
 from typing import Dict, List
 import regex
+import re
 from tqdm import tqdm
 import sqlite3
 import importlib.util
@@ -25,8 +26,7 @@ from drqa.tokenizers import SimpleTokenizer
 from drqa.retriever import DocDB
 from drqa.retriever import utils
 
-import spacy
-spacy_nlp = spacy.load("en_core_web_sm", disable = ['tagger', 'ner'])
+from nltk.tokenize import sent_tokenize
 
 DEFAULT_CONVERT_CONFIG = {
     'tokenizer': SimpleTokenizer,
@@ -108,10 +108,10 @@ def split_doc2sent(docs: List[str]) -> (List[str], List[List[int]]):
     """
     flat_splits = []
     didx2sidx = []
-    nlp_docs = list(spacy_nlp.pipe(docs))
 
-    for nlp in nlp_docs:
-        splits = [sent.strip() for sent in nlp.sents]
+    for doc in docs:
+        splits = sent_tokenize(doc)
+        splits = list(map(lambda x: re.sub(r'\n+', ' ', x.strip()), splits))
         didx2sidx.append([len(flat_splits), -1])
         flat_splits.extend(splits)
         didx2sidx[-1][1] = len(flat_splits)
@@ -154,6 +154,7 @@ class ConvertData2ParagraphClsInput(object):
             initializer=init,
             initargs=(self.tok_class, self.tok_opts, self.db_class, self.db_opts)
         )
+        self.save_all = save_all
 
 
     def read_input(self, data_file: str) -> List[Dict]:
@@ -216,6 +217,7 @@ class ConvertData2ParagraphClsInput(object):
         for qidx in range(len(queries)):
             matched_para = []
             distant_num = 0
+            total_retrieval = 0
 
             for rel_didx, did in enumerate(all_docids[qidx]):
                 start, end = didx2sidx[did2didx[did]]
@@ -230,7 +232,7 @@ class ConvertData2ParagraphClsInput(object):
 
                             'id': (qidx, did, rel_didx, sidx),
                             'question': queries[qidx],
-                            'document': flat_splits[sidx],
+                            # 'document': flat_splits[sidx],
                             'label': '0',
                             'tfidf_score': all_doc_scores[qidx][rel_didx],
                         })
@@ -243,7 +245,7 @@ class ConvertData2ParagraphClsInput(object):
 
                             'id': (qidx, did, rel_didx, sidx),
                             'question': queries[qidx],
-                            'document': flat_splits[sidx],
+                            # 'document': flat_splits[sidx],
                             'label': '1',
                             'tfidf_score': all_doc_scores[qidx][rel_didx],
                         })
@@ -254,6 +256,7 @@ class ConvertData2ParagraphClsInput(object):
                 logger.info('Warning, question {} does not have distant answers in top {}.'.format(
                     queries[qidx], self.n_doc))
             else:
+                total_retrieval += distant_num
                 distant_positive_num += 1
             para_examples.append(matched_para)
 
@@ -261,6 +264,7 @@ class ConvertData2ParagraphClsInput(object):
 
         logger.info('Processed %d queries in %.4f (s)' %
                     (len(queries), time.time() - t0))
+        logger.info('Average number of retrieval: ', total_retrieval / len(para_examples))
 
         return para_examples, distant_positive_num
 
