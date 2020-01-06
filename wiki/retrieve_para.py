@@ -230,9 +230,12 @@ class ConvertData2ParagraphClsInput(object):
                                                                                tokenizer=self.tokenizer):
                         matched_para.append({
 
-                            'id': (qidx, did, rel_didx, sidx),
-                            'question': queries[qidx],
-                            # 'document': flat_splits[sidx],
+                            'wiki_id': (qidx, did, rel_didx, sidx),
+                            'para_id': para_ids[qidx],
+                            'entity': entities[qidx],
+                            # 'topic': topics[qidx],
+                            # 'paragraph': queries[qidx],
+                            'wiki': flat_splits[sidx],
                             'label': '0',
                             'tfidf_score': all_doc_scores[qidx][rel_didx],
                         })
@@ -243,9 +246,12 @@ class ConvertData2ParagraphClsInput(object):
                                                                             tokenizer=self.tokenizer):
                         matched_para.append({
 
-                            'id': (qidx, did, rel_didx, sidx),
-                            'question': queries[qidx],
-                            # 'document': flat_splits[sidx],
+                            'wiki_id': (qidx, did, rel_didx, sidx),
+                            'para_id': para_ids[qidx],
+                            'entity': entities[qidx],
+                            # 'topic': topics[qidx],
+                            # 'paragraph': queries[qidx],
+                            'wiki': flat_splits[sidx],
                             'label': '1',
                             'tfidf_score': all_doc_scores[qidx][rel_didx],
                         })
@@ -264,7 +270,7 @@ class ConvertData2ParagraphClsInput(object):
 
         logger.info('Processed %d queries in %.4f (s)' %
                     (len(queries), time.time() - t0))
-        logger.info('Average number of retrieval: ', total_retrieval / len(para_examples))
+        logger.info('Average number of retrieval: {}'.format(total_retrieval / len(para_examples)))
 
         return para_examples, distant_positive_num
 
