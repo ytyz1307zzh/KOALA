@@ -274,15 +274,15 @@ class ConvertData2ParagraphClsInput(object):
 
         return para_examples, distant_positive_num
 
-    def write_data_paras(self, para_examples, data_file):
-        logger.info('write paras of data file to {}'.format(data_file + '.para'))
-        with open(data_file + '.para', 'w', encoding='utf-8') as fout:
+    def write_data_paras(self, para_examples: List[List], output: str):
+        logger.info('write paras of data file to {}'.format(output))
+        with open(output, 'w', encoding='utf-8') as fout:
             for para_examples_batch in tqdm(para_examples, desc='write paras', total=len(para_examples)):
                 for para_example in para_examples_batch:
                     fout.write(json.dumps(para_example, ensure_ascii=False))
                     fout.write('\n')
 
-    def convert(self, data_file):
+    def convert(self, data_file: str, output: str):
         para_examples = []
         data_num = 0
         data_examples  = self.read_input(data_file=data_file)
@@ -303,7 +303,7 @@ class ConvertData2ParagraphClsInput(object):
                                                                         len(para_examples),
                                                                         ))
         logger.info('Recall in top {} is {}'.format(self.n_doc, positive_total * 1.0 / data_num))
-        self.write_data_paras(para_examples, data_file=data_file)
+        self.write_data_paras(para_examples = para_examples, output = output)
 
 
 PROCESS_WIKI2PARA_DB = None
@@ -375,9 +375,10 @@ class ConvertWikiPage2Paragraph(object):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-data_file', help='data file to convert to paras for classification.', required=True)
-    parser.add_argument('-ret_path', help='retriver model path')
-    parser.add_argument('-db_path', help='data base path')
+    parser.add_argument('-data_file', required=True, help='data file to convert to paras for classification.')
+    parser.add_argument('-ret_path', required=True, help='retriver model path')
+    parser.add_argument('-db_path', required=True, help='data base path')
+    parser.add_argument('-output', required=True, help='output path')
     parser.add_argument('-batch', type=int, default=128, help='batch size in retrieval')
     parser.add_argument('-num_workers', default=None, help='number of processes')
     parser.add_argument('-n_doc', default=50, type=int, help='number of desired retrieval')
@@ -398,7 +399,7 @@ if __name__ == '__main__':
                                                  small=opt.small,
                                                  save_all=opt.save_all
                                                  )
-    convert2para.convert(opt.data_file)
+    convert2para.convert(data_file=opt.data_file, output=opt.output)
 
     # cwpp = ConvertWikiPage2Paragraph(db_path='/home/t-pinie/facebook-drqa/data/wikipedia/docs.db', num_workers=cpu_count())
     # cwpp.convert_page_to_paragraph(save_path=args.db_para_save_path)
