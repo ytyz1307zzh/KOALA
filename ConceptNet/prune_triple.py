@@ -218,7 +218,7 @@ if __name__ == "__main__":
         total_relevance += num_relevance
         total_score += num_score
 
-        if len(selected_triples) < 10:
+        if len(selected_triples) < opt.max:
             less_cnt += 1
 
         selected_triples = triple2sent(raw_triples = selected_triples, trans_rules = trans_rules)
@@ -234,7 +234,7 @@ if __name__ == "__main__":
 
     total_instances = len(result)
     print(f'Total instances: {total_instances}')
-    print(f'Instances with less than 10 ConceptNet triples collected: {less_cnt} ({(less_cnt/total_instances)*100:.2f}%)')
+    print(f'Instances with less than {opt.max} ConceptNet triples collected: {less_cnt} ({(less_cnt/total_instances)*100:.2f}%)')
     print(f'Average number of relevance-based triples: {total_relevance / total_instances:.2f}')
     print(f'Average number of score-based triples: {total_score / total_instances:.2f}')
     print(f'{len(result)} instances finished.')

@@ -169,7 +169,7 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
     para_embed = torch.mean(second_last_embed[0, 1:-1, :], dim=0)  # get rid of <CLS> (first token) and <SEP> (last token)
 
     similarity = [cos_similarity(para_embed, embed) for embed in triple_embed]
-    topk_score, topk_id = torch.tensor(similarity).topk(k=max, largest=True, sorted=True)
+    topk_score, topk_id = torch.tensor(similarity).topk(k = min(max, len(similarity)), largest = True, sorted = True)
     selected_triples = [raw_triples[int(idx)] for idx in topk_id]
     selected_triples = [selected_triples[j]+f', {topk_score[j].item():.4f}' for j in range(len(selected_triples))]  # append score to triple
 
@@ -217,7 +217,7 @@ if __name__ == "__main__":
         selected_triples, topk_scores = select_triple(tokenizer = tokenizer, model = model, raw_triples = list(set(raw_triples)),
                                                       paragraph = paragraph, batch_size = opt.batch, max = opt.max, cuda = cuda)
 
-        if len(selected_triples) < 10:
+        if len(selected_triples) < opt.max:
             less_cnt += 1
 
         result.append({'id': para_id,
@@ -231,4 +231,4 @@ if __name__ == "__main__":
 
     total_instances = len(result)
     print(f'Total instances: {total_instances}')
-    print(f'Instances with less than 10 ConceptNet triples collected: {less_cnt} ({(less_cnt / total_instances) * 100:.2f}%)')
+    print(f'Instances with less than {opt.max} ConceptNet triples collected: {less_cnt} ({(less_cnt / total_instances) * 100:.2f}%)')
