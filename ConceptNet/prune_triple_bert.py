@@ -9,6 +9,7 @@ import json
 from tqdm import tqdm
 from typing import List, Dict
 import re
+import time
 from transformers import BertModel, BertTokenizer
 import torch
 import torch.nn.functional as F
@@ -108,10 +109,13 @@ def pad_to_longest(batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTe
     return pad_batch, attention_mask
 
 
-def select_triple(raw_triples: List[str], paragraph: str, batch_size: int, max: int, cuda: bool) -> (List[str], List):
+def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
+                  batch_size: int, max: int, cuda: bool) -> (List[str], List):
     """
     Select related triples from the rough retrieval set using BERT embedding.
     Args:
+        tokenizer: a BertTokenizer instance.
+        model: a BertModel instance.
         raw_triples: triples collected from ConceptNet. Should be a list of strings, which contains 10 fields connected by comma.
         paragraph: the input paragraph.
         max: number of triples to collect.
@@ -119,10 +123,6 @@ def select_triple(raw_triples: List[str], paragraph: str, batch_size: int, max: 
         the top-max similar triples to the context.
     """
     cand_sents = list(map(lambda x: x.strip().split(', ')[-1], raw_triples))
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertModel.from_pretrained('bert-base-uncased', output_hidden_states=True)
-    if cuda:
-        model.cuda()
 
     input_ids = list(map(lambda s: tokenizer.encode(s, add_special_tokens=True), cand_sents))
     input_batches = [input_ids[batch_idx * batch_size : (batch_idx + 1) * batch_size]
@@ -171,6 +171,7 @@ def select_triple(raw_triples: List[str], paragraph: str, batch_size: int, max: 
     similarity = [cos_similarity(para_embed, embed) for embed in triple_embed]
     topk_score, topk_id = torch.tensor(similarity).topk(k=max, largest=True, sorted=True)
     selected_triples = [raw_triples[int(idx)] for idx in topk_id]
+    selected_triples = [selected_triples[j]+f', {topk_score[j].item():.4f}' for j in range(len(selected_triples))]  # append score to triple
 
     return selected_triples, topk_score
 
@@ -194,6 +195,14 @@ if __name__ == "__main__":
     less_cnt = 0
     cuda = False if opt.no_cuda else True
 
+    print('[INFO] Loading pretrained BERT...')
+    start_time = time.time()
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained('bert-base-uncased', output_hidden_states=True)
+    if cuda:
+        model.cuda()
+    print(f'[INFO] Model loaded. Time elapse: {time.time()-start_time:.2f}s')
+
     for instance in tqdm(data):
         para_id = instance['id']
         entity = instance['entity']
@@ -205,8 +214,8 @@ if __name__ == "__main__":
         raw_triples = triple2sent(raw_triples = raw_triples, rel_rules = rel_rules, trans_rules = trans_rules)
 
         # raw_triples may contain repetitive fields (multiple entities)
-        selected_triples, topk_scores = select_triple(raw_triples = list(set(raw_triples)), paragraph = paragraph,
-                                         batch_size = opt.batch, max = opt.max, cuda = cuda)
+        selected_triples, topk_scores = select_triple(tokenizer = tokenizer, model = model, raw_triples = list(set(raw_triples)),
+                                                      paragraph = paragraph, batch_size = opt.batch, max = opt.max, cuda = cuda)
 
         if len(selected_triples) < 10:
             less_cnt += 1
@@ -215,7 +224,6 @@ if __name__ == "__main__":
                      'entity': entity,
                      'topic': topic,
                      'paragraph': paragraph,
-                     'score': topk_scores.tolist(),
                      'cpnet': selected_triples
                      })
 
