@@ -108,7 +108,7 @@ def pad_to_longest(batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTe
     return pad_batch, attention_mask
 
 
-def select_triple(raw_triples: List[str], paragraph: str, batch_size: int, max: int, cuda: bool) -> List[str]:
+def select_triple(raw_triples: List[str], paragraph: str, batch_size: int, max: int, cuda: bool) -> (List[str], List):
     """
     Select related triples from the rough retrieval set using BERT embedding.
     Args:
@@ -132,6 +132,8 @@ def select_triple(raw_triples: List[str], paragraph: str, batch_size: int, max: 
 
     for batch in input_batches:
         # batch: (batch, seq_len)
+        if not batch:
+            continue
         batch, attention_mask = pad_to_longest(batch = batch, pad_id = tokenizer.pad_token_id)
         if cuda:
             batch = batch.cuda()
@@ -146,7 +148,7 @@ def select_triple(raw_triples: List[str], paragraph: str, batch_size: int, max: 
         assert second_last_embed.size() == (batch.size(0), batch.size(1), 768)
 
         for i in range(batch.size(0)):
-            embedding = batch[i]  # (max_length, hidden_size)
+            embedding = second_last_embed[i]  # (max_length, hidden_size)
             pad_mask = attention_mask[i]
             num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
             token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
@@ -170,7 +172,7 @@ def select_triple(raw_triples: List[str], paragraph: str, batch_size: int, max: 
     topk_score, topk_id = torch.tensor(similarity).topk(k=max, largest=True, sorted=True)
     selected_triples = [raw_triples[int(idx)] for idx in topk_id]
 
-    return selected_triples
+    return selected_triples, topk_score
 
 
 if __name__ == "__main__":
@@ -203,7 +205,7 @@ if __name__ == "__main__":
         raw_triples = triple2sent(raw_triples = raw_triples, rel_rules = rel_rules, trans_rules = trans_rules)
 
         # raw_triples may contain repetitive fields (multiple entities)
-        selected_triples = select_triple(raw_triples = list(set(raw_triples)), paragraph = paragraph,
+        selected_triples, topk_scores = select_triple(raw_triples = list(set(raw_triples)), paragraph = paragraph,
                                          batch_size = opt.batch, max = opt.max, cuda = cuda)
 
         if len(selected_triples) < 10:
@@ -213,6 +215,7 @@ if __name__ == "__main__":
                      'entity': entity,
                      'topic': topic,
                      'paragraph': paragraph,
+                     'score': topk_scores.tolist(),
                      'cpnet': selected_triples
                      })
 
