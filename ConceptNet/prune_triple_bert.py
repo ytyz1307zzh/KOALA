@@ -15,6 +15,13 @@ import torch
 import torch.nn.functional as F
 
 
+def get_weight(line: str) -> float:
+    triple = line.strip().split(', ')
+    assert len(triple) >= 9
+    weight = float(triple[7])
+    return weight
+
+
 def read_relation(filename: str) -> Dict[str, str]:
     file = open(filename, 'r', encoding='utf8')
     rel_rules = {}
@@ -109,6 +116,8 @@ def pad_to_longest(batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTe
     return pad_batch, attention_mask
 
 
+useful_cnt = 0
+
 def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
                   batch_size: int, max: int, cuda: bool) -> (List[str], List):
     """
@@ -122,6 +131,7 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
     Return:
         the top-max similar triples to the context.
     """
+    total_triples = len(raw_triples)
     cand_sents = list(map(lambda x: x.strip().split(', ')[-1], raw_triples))
 
     input_ids = list(map(lambda s: tokenizer.encode(s, add_special_tokens=True), cand_sents))
@@ -144,11 +154,11 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
 
         _, _, hidden_states = outputs
         assert len(hidden_states) == 13
-        second_last_embed = hidden_states[-2]  # use the embedding from second-last BERT layer
-        assert second_last_embed.size() == (batch.size(0), batch.size(1), 768)
+        last_embed = hidden_states[-1]  # use the embedding from second-last BERT layer
+        assert last_embed.size() == (batch.size(0), batch.size(1), 768)
 
         for i in range(batch.size(0)):
-            embedding = second_last_embed[i]  # (max_length, hidden_size)
+            embedding = last_embed[i]  # (max_length, hidden_size)
             pad_mask = attention_mask[i]
             num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
             token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
@@ -164,14 +174,29 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
     assert len(outputs) == 3
     _, _, hidden_states = outputs
     assert len(hidden_states) == 13
-    second_last_embed = hidden_states[-2]  # use the embedding from second-last BERT layer
-    assert second_last_embed.size() == (1, para_ids.size(1), 768)
-    para_embed = torch.mean(second_last_embed[0, 1:-1, :], dim=0)  # get rid of <CLS> (first token) and <SEP> (last token)
+    last_embed = hidden_states[-1]  # use the embedding from second-last BERT layer
+    assert last_embed.size() == (1, para_ids.size(1), 768)
+    para_embed = torch.mean(last_embed[0, 1:-1, :], dim=0)  # get rid of <CLS> (first token) and <SEP> (last token)
 
-    similarity = [cos_similarity(para_embed, embed) for embed in triple_embed]
-    topk_score, topk_id = torch.tensor(similarity).topk(k = min(max, len(similarity)), largest = True, sorted = True)
-    selected_triples = [raw_triples[int(idx)] for idx in topk_id]
-    selected_triples = [selected_triples[j]+f', {topk_score[j].item():.4f}' for j in range(len(selected_triples))]  # append score to triple
+    global useful_cnt
+    useful_triples_id = [idx for idx in range(total_triples) if get_weight(raw_triples[idx]) >= 1.0]
+
+    # if the number of triples with weight >= 1.0 is large enough, then only select from these triples
+    if len(useful_triples_id) >= max:
+        useful_triples_embed = [triple_embed[idx] for idx in useful_triples_id]
+        similarity = [cos_similarity(para_embed, embed) for embed in useful_triples_embed]
+        topk_score, topk_id = torch.tensor(similarity).topk(k=min(max, len(similarity)), largest=True, sorted=True)
+        selected_triples = [raw_triples[useful_triples_id[int(idx)]] for idx in topk_id]
+        selected_triples = [selected_triples[j] + f', {topk_score[j].item():.4f}' for j in
+                            range(len(selected_triples))]  # append score to triple
+        useful_cnt += 1
+
+    else:
+        similarity = [cos_similarity(para_embed, embed) for embed in triple_embed]
+        topk_score, topk_id = torch.tensor(similarity).topk(k = min(max, len(similarity)), largest = True, sorted = True)
+        selected_triples = [raw_triples[int(idx)] for idx in topk_id]
+        selected_triples = [selected_triples[j]+f', {topk_score[j].item():.4f}' for j in
+                            range(len(selected_triples))]  # append score to triple
 
     return selected_triples, topk_score
 
@@ -232,3 +257,4 @@ if __name__ == "__main__":
     total_instances = len(result)
     print(f'Total instances: {total_instances}')
     print(f'Instances with less than {opt.max} ConceptNet triples collected: {less_cnt} ({(less_cnt / total_instances) * 100:.2f}%)')
+    print(f'Instances with more than {2*opt.max} ConceptNet triples with weight >=1.0: {useful_cnt} ({(useful_cnt / total_instances) * 100:.2f}%)')
