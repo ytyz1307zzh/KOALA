@@ -206,10 +206,10 @@ if __name__ == "__main__":
         entity = instance['entity']
         paragraph = instance['paragraph']
         topic = instance['topic']
+        prompt = instance['prompt']
         raw_triples = instance['cpnet']
 
-        context_set = remove_stopword(paragraph)
-        context_set.union(remove_stopword(topic))
+        context_set = remove_stopword(prompt + ' ' + paragraph)
 
         # raw_triples may contain repetitive fields (multiple entities)
         selected_triples, num_relevance, num_score = select_triple(entity = entity, raw_triples = list(set(raw_triples)),
@@ -224,11 +224,12 @@ if __name__ == "__main__":
         selected_triples = triple2sent(raw_triples = selected_triples, trans_rules = trans_rules)
 
         result.append({'id': para_id,
-                     'entity': entity,
-                     'topic': topic,
-                     'paragraph': paragraph,
-                     'cpnet': selected_triples
-                     })
+                       'entity': entity,
+                       'topic': topic,
+                       'prompt': prompt,
+                       'paragraph': paragraph,
+                       'cpnet': selected_triples
+                       })
 
     json.dump(result, open(opt.output, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
 

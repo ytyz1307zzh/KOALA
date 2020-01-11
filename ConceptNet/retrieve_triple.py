@@ -114,6 +114,7 @@ def retrieve(datapath: str) -> (List, int):
         entity_name = instance['entity']
         topic = instance['topic']
         paragraph = instance['paragraph']
+        prompt = instance['prompt']
 
         triples = []
         for ent in entity_name.split(';'):
@@ -123,6 +124,7 @@ def retrieve(datapath: str) -> (List, int):
         result.append({'id': para_id,
                        'entity': entity_name,
                        'topic': topic,
+                       'prompt': prompt,
                        'paragraph': paragraph,
                        'cpnet': triples
                        })

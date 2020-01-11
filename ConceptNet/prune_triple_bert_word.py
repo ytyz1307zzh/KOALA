@@ -7,7 +7,7 @@
 import argparse
 import json
 from tqdm import tqdm
-from typing import List, Dict
+from typing import List, Dict, Set
 import re
 import time
 from transformers import BertModel, BertTokenizer
@@ -16,17 +16,45 @@ import numpy as np
 import torch.nn.functional as F
 from spacy.lang.en import STOP_WORDS
 STOP_WORDS = set(STOP_WORDS) - {'bottom', 'serious', 'top', 'alone', 'around', 'used', 'behind', 'side', 'mine', 'well'}
+from Stemmer import PorterStemmer
+stemmer = PorterStemmer()
 BERT_HIDDEN_SIZE = 768
 
 
-def remove_stopword_and_punc(text: List[str]) -> List[int]:
+def stem(word: str) -> str:
+    """
+    Stem a single word
+    """
+    word = word.lower().strip()
+    return stemmer.stem(word)
+
+
+def find_entity_in_para(paragraph: str, entity: str) -> Set[str]:
+    """
+    Find all existing forms of the given entity (might be separated by semicolon) in the certain paragraph.
+    """
+    para_tokens = [token for token in paragraph.strip().split()]
+    entity_tokens = {stem(token) for ent in entity.strip().split(';') for token in ent.strip().split()}
+    entity_set = set()
+
+    for token in para_tokens:
+        if stem(token) in entity_tokens:
+            entity_set.add(token)
+
+    return entity_set
+
+
+def remove_stopword_and_entity(text: List[str], entity_set: Set[str]) -> List[int]:
     """
     Args:
         text: tokenized paragraph
     Returns:
         ids of non-stop words
     """
-    return [idx for idx in range(len(text)) if text[idx] not in STOP_WORDS and text[idx].isalpha()]
+    return [idx for idx in range(len(text))
+            if text[idx] not in STOP_WORDS
+            and text[idx] not in entity_set
+            and text[idx].isalpha()]
 
 
 def get_weight(line: str) -> float:
@@ -187,7 +215,7 @@ def pad_to_longest(batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTe
 
 useful_cnt = 0
 
-def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
+def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str, entity_set: Set[str],
                   batch_size: int, max_num: int, cuda: bool) -> (List[str], List):
     """
     Select related triples from the rough retrieval set using BERT embedding.
@@ -248,7 +276,7 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
 
     # get embedding list of the content words in paragraph
     para_tokens = paragraph.strip().split()
-    raw_content_id = remove_stopword_and_punc(para_tokens)
+    raw_content_id = remove_stopword_and_entity(text=para_tokens, entity_set=entity_set)
     raw_content_word = [para_tokens[idx] for idx in raw_content_id]
     offset_map = find_token_offset(origin_tokens=para_tokens,
                                    tokens=tokenizer.convert_ids_to_tokens(para_ids[0], skip_special_tokens=True))
@@ -282,11 +310,24 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
         similarity.append(content_sim[matched_id])
         matched_words.append(raw_content_word[matched_id])
 
-    topk_score, topk_id = torch.tensor(similarity).topk(k=min(max_num, len(similarity)), largest=True, sorted=True)
-    selected_triples = [raw_triples[int(idx)] for idx in topk_id]
-    matched_words = [matched_words[int(idx)] for idx in topk_id]
-    selected_triples = [selected_triples[j] + f', {topk_score[j].item():.4f}, {matched_words[j]}'
-                        for j in range(len(selected_triples))]  # append score to triple
+    global useful_cnt
+    useful_triples_id = [idx for idx in range(total_triples) if get_weight(raw_triples[idx]) >= 1.0]
+
+    if len(useful_triples_id) >= max_num:
+        useful_similarity = [similarity[idx] for idx in useful_triples_id]
+        topk_score, topk_id = torch.tensor(useful_similarity).topk(k=max_num, largest=True, sorted=True)
+        selected_triples = [raw_triples[useful_triples_id[int(idx)]] for idx in topk_id]
+        useful_matched_words = [matched_words[useful_triples_id[int(idx)]] for idx in topk_id]
+        selected_triples = [selected_triples[j] + f', {topk_score[j].item():.4f}, {useful_matched_words[j]}'
+                            for j in range(len(selected_triples))]  # append score to triple
+        useful_cnt += 1
+
+    else:
+        topk_score, topk_id = torch.tensor(similarity).topk(k=min(max_num, len(similarity)), largest=True, sorted=True)
+        selected_triples = [raw_triples[int(idx)] for idx in topk_id]
+        matched_words = [matched_words[int(idx)] for idx in topk_id]
+        selected_triples = [selected_triples[j] + f', {topk_score[j].item():.4f}, {matched_words[j]}'
+                            for j in range(len(selected_triples))]  # append score to triple
 
     return selected_triples
 
@@ -323,28 +364,33 @@ if __name__ == "__main__":
         entity = instance['entity']
         paragraph = instance['paragraph']
         topic = instance['topic']
+        prompt = instance['prompt']
         raw_triples = instance['cpnet']
 
         # omit the triples with invalid direction and transform the others to natural sentences
         raw_triples = triple2sent(raw_triples = raw_triples, rel_rules = rel_rules, trans_rules = trans_rules)
 
+        entity_set = find_entity_in_para(paragraph=paragraph, entity=entity)
+
         # raw_triples may contain repetitive fields (multiple entities)
         selected_triples = select_triple(tokenizer = tokenizer, model = model, raw_triples = list(set(raw_triples)),
-                                         paragraph = paragraph, batch_size = opt.batch, max_num = opt.max, cuda = cuda)
+                                         paragraph = paragraph, entity_set = entity_set,
+                                         batch_size = opt.batch, max_num = opt.max, cuda = cuda)
 
         if len(selected_triples) < opt.max:
             less_cnt += 1
 
         result.append({'id': para_id,
-                     'entity': entity,
-                     'topic': topic,
-                     'paragraph': paragraph,
-                     'cpnet': selected_triples
-                     })
+                       'entity': entity,
+                       'topic': topic,
+                       'prompt': prompt,
+                       'paragraph': paragraph,
+                       'cpnet': selected_triples
+                       })
 
     json.dump(result, open(opt.output, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
 
     total_instances = len(result)
     print(f'Total instances: {total_instances}')
     print(f'Instances with less than {opt.max} ConceptNet triples collected: {less_cnt} ({(less_cnt / total_instances) * 100:.2f}%)')
-    print(f'Instances with more than {2*opt.max} ConceptNet triples with weight >=1.0: {useful_cnt} ({(useful_cnt / total_instances) * 100:.2f}%)')
+    print(f'Instances with more than {opt.max} ConceptNet triples with weight >=1.0: {useful_cnt} ({(useful_cnt / total_instances) * 100:.2f}%)')

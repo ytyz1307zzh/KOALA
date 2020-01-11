@@ -198,7 +198,7 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
         selected_triples = [selected_triples[j]+f', {topk_score[j].item():.4f}' for j in
                             range(len(selected_triples))]  # append score to triple
 
-    return selected_triples, topk_score
+    return selected_triples
 
 
 if __name__ == "__main__":
@@ -233,28 +233,30 @@ if __name__ == "__main__":
         entity = instance['entity']
         paragraph = instance['paragraph']
         topic = instance['topic']
+        prompt = instance['prompt']
         raw_triples = instance['cpnet']
 
         # omit the triples with invalid direction and transform the others to natural sentences
         raw_triples = triple2sent(raw_triples = raw_triples, rel_rules = rel_rules, trans_rules = trans_rules)
 
         # raw_triples may contain repetitive fields (multiple entities)
-        selected_triples, topk_scores = select_triple(tokenizer = tokenizer, model = model, raw_triples = list(set(raw_triples)),
-                                                      paragraph = paragraph, batch_size = opt.batch, max = opt.max, cuda = cuda)
+        selected_triples = select_triple(tokenizer = tokenizer, model = model, raw_triples = list(set(raw_triples)),
+                                         paragraph = paragraph, batch_size = opt.batch, max = opt.max, cuda = cuda)
 
         if len(selected_triples) < opt.max:
             less_cnt += 1
 
         result.append({'id': para_id,
-                     'entity': entity,
-                     'topic': topic,
-                     'paragraph': paragraph,
-                     'cpnet': selected_triples
-                     })
+                       'entity': entity,
+                       'topic': topic,
+                       'prompt': prompt,
+                       'paragraph': paragraph,
+                       'cpnet': selected_triples
+                       })
 
     json.dump(result, open(opt.output, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
 
     total_instances = len(result)
     print(f'Total instances: {total_instances}')
     print(f'Instances with less than {opt.max} ConceptNet triples collected: {less_cnt} ({(less_cnt / total_instances) * 100:.2f}%)')
-    print(f'Instances with more than {2*opt.max} ConceptNet triples with weight >=1.0: {useful_cnt} ({(useful_cnt / total_instances) * 100:.2f}%)')
+    print(f'Instances with more than {opt.max} ConceptNet triples with weight >=1.0: {useful_cnt} ({(useful_cnt / total_instances) * 100:.2f}%)')
