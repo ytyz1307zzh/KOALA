@@ -81,7 +81,7 @@ def has_answer(answer: str, para_text: str, tokenizer):
     return False
 
 
-def _split_doc(doc):
+def _split_doc(doc: str):
     """Given a doc, split it into chunks (by paragraph)."""
     curr = []
     curr_len = 0
@@ -121,7 +121,7 @@ def split_doc2sent(docs: List[str]) -> (List[str], List[List[int]]):
 
 class ConvertData2ParagraphClsInput(object):
     def __init__(self, tokenizer='', ranker_config=None, db_config=None, n_doc=5,
-                 num_workers=1, convert_bs=48, ngram=2, small=False, save_all=False):
+                 num_workers=1, convert_bs=48, ngram=2, small=False):
 
         self.convert_bs = convert_bs
         self.small = small
@@ -154,7 +154,6 @@ class ConvertData2ParagraphClsInput(object):
             initializer=init,
             initargs=(self.tok_class, self.tok_opts, self.db_class, self.db_opts)
         )
-        self.save_all = save_all
 
 
     def read_input(self, data_file: str) -> List[Dict]:
@@ -204,59 +203,33 @@ class ConvertData2ParagraphClsInput(object):
         did2didx = {did: didx for didx, did in enumerate(flat_docids)}
         doc_texts = self.processes.map(fetch_text, flat_docids)
 
-        # Split and flatten documents. Maintain a mapping from doc (index in
-        # flat list) to split (index in flat list).
-        # didx2sidx: List[doc_idx -> [split_idx_start, split_idx_end]]
-        flat_splits, didx2sidx = split_doc2sent(doc_texts)
-        if len(flat_splits) != len(doc_texts):
-            logger.info('{} doc texts are splited into {} splits'.format(len(doc_texts), len(flat_splits)))
-
         para_examples = []
         distant_positive_num = 0
         total_retrieval = 0
 
         for qidx in range(len(queries)):
+            example = {'para_id': para_ids[qidx],
+                        'entity': entities[qidx],
+                        'topic': topics[qidx],
+                        'paragraph': queries[qidx]
+                       }
             matched_para = []
             distant_num = 0
 
             for rel_didx, did in enumerate(all_docids[qidx]):
-                start, end = didx2sidx[did2didx[did]]
+                didx = did2didx[did]
 
-                for sidx in range(start, end):
+                if (len(queries[qidx]) > 0 and
+                    len(doc_texts[didx].split()) > 2):
 
-                    if self.save_all and (len(queries[qidx]) > 0 and
-                        len(flat_splits[sidx].split()) > 2) and not has_answer(answer=entities[qidx],
-                                                                               para_text=flat_splits[sidx],
-                                                                               tokenizer=self.tokenizer):
-                        matched_para.append({
+                    matched_para.append({
+                        'wiki_id': did,
+                        'para_id': rel_didx,
+                        'tfidf_score': all_doc_scores[qidx][rel_didx],
+                        'text': doc_texts[didx]
+                    })
 
-                            'wiki_id': (qidx, did, rel_didx, sidx),
-                            'para_id': para_ids[qidx],
-                            'entity': entities[qidx],
-                            # 'topic': topics[qidx],
-                            # 'paragraph': queries[qidx],
-                            'wiki': flat_splits[sidx],
-                            'label': '0',
-                            'tfidf_score': all_doc_scores[qidx][rel_didx],
-                        })
-
-                    elif (len(queries[qidx]) > 0 and
-                        len(flat_splits[sidx].split()) > 2) and has_answer(answer=entities[qidx],
-                                                                            para_text=flat_splits[sidx],
-                                                                            tokenizer=self.tokenizer):
-                        matched_para.append({
-
-                            'wiki_id': (qidx, did, rel_didx, sidx),
-                            'para_id': para_ids[qidx],
-                            'entity': entities[qidx],
-                            # 'topic': topics[qidx],
-                            # 'paragraph': queries[qidx],
-                            'wiki': flat_splits[sidx],
-                            'label': '1',
-                            'tfidf_score': all_doc_scores[qidx][rel_didx],
-                        })
-                        distant_num += 1
-
+                    distant_num += 1
 
             if distant_num == 0:
                 logger.info('Warning, question {} does not have distant answers in top {}.'.format(
@@ -264,7 +237,9 @@ class ConvertData2ParagraphClsInput(object):
             else:
                 total_retrieval += distant_num
                 distant_positive_num += 1
-            para_examples.append(matched_para)
+
+            example['wiki'] = matched_para
+            para_examples.append(example)
 
         logger.info('Reading %d questions...' % len(para_examples))
 
@@ -274,13 +249,6 @@ class ConvertData2ParagraphClsInput(object):
 
         return para_examples, distant_positive_num
 
-    def write_data_paras(self, para_examples: List[List], output: str):
-        logger.info('write paras of data file to {}'.format(output))
-        with open(output, 'w', encoding='utf-8') as fout:
-            for para_examples_batch in tqdm(para_examples, desc='write paras', total=len(para_examples)):
-                for para_example in para_examples_batch:
-                    fout.write(json.dumps(para_example, ensure_ascii=False))
-                    fout.write('\n')
 
     def convert(self, data_file: str, output: str):
         para_examples = []
@@ -303,7 +271,8 @@ class ConvertData2ParagraphClsInput(object):
                                                                         len(para_examples),
                                                                         ))
         logger.info('Recall in top {} is {}'.format(self.n_doc, positive_total * 1.0 / data_num))
-        self.write_data_paras(para_examples = para_examples, output = output)
+        json.dump(para_examples, open(output, 'w', encoding='utf8'), indent=4, ensure_ascii=False)
+        print('Saved in JSON file.')
 
 
 PROCESS_WIKI2PARA_DB = None
@@ -383,8 +352,6 @@ if __name__ == '__main__':
     parser.add_argument('-num_workers', default=None, help='number of processes')
     parser.add_argument('-n_doc', default=50, type=int, help='number of desired retrieval')
     parser.add_argument('-small', default=False, action='store_true', help='if true, use a tiny part of data for debugging')
-    parser.add_argument('-save_all', default=False, action='store_true', help='if true, save all sentences no matter whether it matches'
-                                                                              'with the context or not')
     # parser.add_argument('--db_para_save_path', help='save path of paragraphs for db')
     opt = parser.parse_args()
 
@@ -397,7 +364,6 @@ if __name__ == '__main__':
                                                  db_config={'db_opt': {'db_path': opt.db_path}},
                                                  n_doc=opt.n_doc,
                                                  small=opt.small,
-                                                 save_all=opt.save_all
                                                  )
     convert2para.convert(data_file=opt.data_file, output=opt.output)
 
