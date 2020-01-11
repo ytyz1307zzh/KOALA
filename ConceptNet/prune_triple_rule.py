@@ -29,14 +29,14 @@ def stem(word: str) -> str:
 
 def get_weight(line: str) -> float:
     triple = line.strip().split(', ')
-    assert len(triple) == 9
-    weight = float(triple[-2])
+    assert len(triple) == 10
+    weight = float(triple[7])
     return weight
 
 
 def get_relation(line: str) -> str:
     triple = line.strip().split(', ')
-    assert len(triple) == 9
+    assert len(triple) == 10
     relation = triple[0]
     return relation
 
@@ -105,7 +105,7 @@ def triple2sent(raw_triples: List[str], trans_rules: Dict[str, str]):
     for line in raw_triples:
 
         triple = line.strip().split(', ')
-        assert len(triple) == 9
+        assert len(triple) == 10
 
         relation = triple[0]
         subj = triple[2]
@@ -156,7 +156,7 @@ def select_triple(entity: str, raw_triples: List[str], context_set: Set[str],
         if not valid_direction(relation = relation, direction = direction.lower(), rel_rules = rel_rules):
             continue
 
-        triples_by_score.append(line)
+        triples_by_score.append(line + ', SCORE')
 
         # find the neighbor concept
         if direction == 'LEFT':
@@ -165,7 +165,7 @@ def select_triple(entity: str, raw_triples: List[str], context_set: Set[str],
             neighbor = set(triple[1].strip().split('_'))
 
         if in_context(concept = neighbor, context = stem_context):
-            triples_by_relevance.append(line)
+            triples_by_relevance.append(line + ', RELEVANCE')
 
     # retrieve at most max/2 relevance-based triples, the others are filled with score-based triples
     triples_by_relevance = [t for t in triples_by_relevance if get_weight(t) >= 1.0]
