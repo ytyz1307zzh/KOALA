@@ -180,7 +180,9 @@ class ConvertData2ParagraphClsInput(object):
     def process_batch(self, examples, n_docs=5):
         """Run a batch of queries' paragraphs (more efficient)."""
         t0 = time.time()
-        queries = [example['paragraph'] for example in examples]
+        paragraphs = [example['paragraph'] for example in examples]
+        prompts = [example['prompt'] for example in examples]
+        queries = [prt + ' ' + para for para, prt in zip(paragraphs, prompts)]
         entities = [example['entity'] for example in examples]
         para_ids = [example['id'] for example in examples]
         topics = [example['topic'] for example in examples]
@@ -209,9 +211,10 @@ class ConvertData2ParagraphClsInput(object):
 
         for qidx in range(len(queries)):
             example = {'para_id': para_ids[qidx],
-                        'entity': entities[qidx],
-                        'topic': topics[qidx],
-                        'paragraph': queries[qidx]
+                       'entity': entities[qidx],
+                       'topic': topics[qidx],
+                       'prompt': prompts[qidx],
+                       'paragraph': queries[qidx]
                        }
             matched_para = []
             distant_num = 0
