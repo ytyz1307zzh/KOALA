@@ -253,6 +253,8 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
     offset_map = find_token_offset(origin_tokens=para_tokens,
                                    tokens=tokenizer.convert_ids_to_tokens(para_ids[0], skip_special_tokens=True))
     offset_map = torch.tensor(offset_map, dtype=torch.long)
+    if cuda:
+        offset_map = offset_map.cuda()
     content_embed = []
     for i in raw_content_id:
         token_mask = (offset_map == i).unsqueeze(-1)  # find the ids of this content word in the tokenized sequence
@@ -268,8 +270,11 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
         offset_map = find_token_offset(origin_tokens=cand_sents[i].strip().split(),
                                        tokens=tokenizer.convert_ids_to_tokens(input_ids[i], skip_special_tokens=True))
         raw_neighbor_id = find_neighbor_in_sent(raw_triple=triple)  # find the ids of neighbor concept in original sentence
-        neighbor_id = [idx for idx in range(len(offset_map)) if offset_map[idx] in raw_neighbor_id]  # map ids to the tokenized sequence
-        embed = triple_embed[i].index_select(dim=0, index=torch.tensor(neighbor_id, dtype=torch.long))
+        neighbor_id = torch.tensor([idx for idx in range(len(offset_map)) if offset_map[idx] in raw_neighbor_id],
+                                   dtype=torch.long)  # map ids to the tokenized sequence
+        if cuda:
+            neighbor_id = neighbor_id.cuda()
+        embed = triple_embed[i].index_select(dim=0, index=neighbor_id)
         assert embed.size() == (len(neighbor_id), BERT_HIDDEN_SIZE)
         neighbor_embed = torch.mean(embed, dim=0)
         content_sim = [cos_similarity(emb, neighbor_embed).item() for emb in content_embed]
