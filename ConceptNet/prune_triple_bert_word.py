@@ -1,5 +1,5 @@
 '''
- @Date  : 01/09/2020
+ @Date  : 01/10/2020
  @Author: Zhihan Zhang
  @mail  : zhangzhihan@pku.edu.cn
  @homepage: ytyz1307zzh.github.io
@@ -12,7 +12,21 @@ import re
 import time
 from transformers import BertModel, BertTokenizer
 import torch
+import numpy as np
 import torch.nn.functional as F
+from spacy.lang.en import STOP_WORDS
+STOP_WORDS = set(STOP_WORDS) - {'bottom', 'serious', 'top', 'alone', 'around', 'used', 'behind', 'side', 'mine', 'well'}
+BERT_HIDDEN_SIZE = 768
+
+
+def remove_stopword_and_punc(text: List[str]) -> List[int]:
+    """
+    Args:
+        text: tokenized paragraph
+    Returns:
+        ids of non-stop words
+    """
+    return [idx for idx in range(len(text)) if text[idx] not in STOP_WORDS and text[idx].isalpha()]
 
 
 def get_weight(line: str) -> float:
@@ -61,6 +75,36 @@ def valid_direction(relation: str, direction: str, rel_rules: Dict[str, str]) ->
         return False
 
 
+def find_token_offset(origin_tokens: List[str], tokens: List[str]) -> List[int]:
+    """
+    Map the original tokens to tokenized BERT sub-tokens.
+    Args:
+        origin_tokens: List of original tokens.
+        tokens: List of sub-tokens given by a BertTokenizer.
+    Return:
+        offset: A list of original token ids, each indexed by a sub-token id.
+    """
+    offset = []
+    j = 0
+    cur_token = ''
+
+    for i in range(len(tokens)):
+        if cur_token != '':
+            cur_token += tokens[i]
+            if '##' in cur_token:
+                cur_token = cur_token.replace('##', '')
+        else:
+            cur_token = tokens[i]
+        if cur_token != origin_tokens[j].lower() and cur_token != '[UNK]':
+            offset.append(j)
+        else:
+            offset.append(j)
+            j += 1
+            cur_token = ''
+
+    return offset
+
+
 def triple2sent(raw_triples: List[str], rel_rules: Dict[str, str], trans_rules: Dict[str, str]):
     """
     Turn the triples to natural language sentences.
@@ -96,8 +140,33 @@ def triple2sent(raw_triples: List[str], rel_rules: Dict[str, str], trans_rules: 
 
 
 def cos_similarity(vec1: torch.Tensor, vec2: torch.Tensor) -> torch.Tensor:
-    assert vec1.size() == vec2.size() == (768,)
+    assert vec1.size() == vec2.size() == (BERT_HIDDEN_SIZE,)
     return F.cosine_similarity(vec1, vec2, dim=0)
+
+
+def find_neighbor_in_sent(raw_triple: str)-> List[int]:
+    """
+    Find the positions of neighboring concept in the sentence.
+    Returns:
+        the list of original token ids of the neighboring concept.
+    """
+    triple = raw_triple.strip().split(', ')
+    assert len(triple) == 10
+
+    subj, obj, direction = triple[2], triple[5], triple[-2]
+    if direction == 'LEFT':
+        neighbor = obj.strip().split('_')
+    elif direction == 'RIGHT':
+        neighbor = subj.strip().split('_')
+
+    sentence = triple[-1].strip().split()
+    sentence_len = len(sentence)
+    neighbor_len = len(neighbor)
+    for i in range(sentence_len - neighbor_len + 1):
+        if sentence[i : i + neighbor_len] == neighbor:
+            return list(range(i, i + neighbor_len))
+
+    raise ValueError('Cannot find the neighbor concept in the sentence')
 
 
 def pad_to_longest(batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTensor):
@@ -119,7 +188,7 @@ def pad_to_longest(batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTe
 useful_cnt = 0
 
 def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
-                  batch_size: int, max: int, cuda: bool) -> (List[str], List):
+                  batch_size: int, max_num: int, cuda: bool) -> (List[str], List):
     """
     Select related triples from the rough retrieval set using BERT embedding.
     Args:
@@ -127,9 +196,9 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
         model: a BertModel instance.
         raw_triples: triples collected from ConceptNet. Should be a list of strings, which contains 10 fields connected by comma.
         paragraph: the input paragraph.
-        max: number of triples to collect.
+        max_num: number of triples to collect.
     Return:
-        the top-max similar triples to the context.
+        the top-max_num similar triples to the context.
     """
     total_triples = len(raw_triples)
     cand_sents = list(map(lambda x: x.strip().split(', ')[-1], raw_triples))
@@ -155,14 +224,14 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
         _, _, hidden_states = outputs
         assert len(hidden_states) == 13
         last_embed = hidden_states[-1]  # use the embedding from second-last BERT layer
-        assert last_embed.size() == (batch.size(0), batch.size(1), 768)
+        assert last_embed.size() == (batch.size(0), batch.size(1), BERT_HIDDEN_SIZE)
 
         for i in range(batch.size(0)):
             embedding = last_embed[i]  # (max_length, hidden_size)
             pad_mask = attention_mask[i]
             num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
             token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
-            triple_embed.append(torch.mean(token_embed, dim=0))
+            triple_embed.append(token_embed)
 
     # now handle the embedding of the paragraph
     para_ids = torch.tensor([tokenizer.encode(paragraph, add_special_tokens=True)])  # batch_size = 1
@@ -170,35 +239,51 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
         para_ids = para_ids.cuda()
     with torch.no_grad():
         outputs = model(para_ids)
-
     assert len(outputs) == 3
     _, _, hidden_states = outputs
     assert len(hidden_states) == 13
     last_embed = hidden_states[-1]  # use the embedding from second-last BERT layer
-    assert last_embed.size() == (1, para_ids.size(1), 768)
-    para_embed = torch.mean(last_embed[0, 1:-1, :], dim=0)  # get rid of <CLS> (first token) and <SEP> (last token)
+    assert last_embed.size() == (1, para_ids.size(1), BERT_HIDDEN_SIZE)
+    para_embed = last_embed[0, 1:-1, :]  # get rid of <CLS> (first token) and <SEP> (last token)
 
-    global useful_cnt
-    useful_triples_id = [idx for idx in range(total_triples) if get_weight(raw_triples[idx]) >= 1.0]
+    # get embedding list of the content words in paragraph
+    para_tokens = paragraph.strip().split()
+    raw_content_id = remove_stopword_and_punc(para_tokens)
+    raw_content_word = [para_tokens[idx] for idx in raw_content_id]
+    offset_map = find_token_offset(origin_tokens=para_tokens,
+                                   tokens=tokenizer.convert_ids_to_tokens(para_ids[0], skip_special_tokens=True))
+    offset_map = torch.tensor(offset_map, dtype=torch.long)
+    content_embed = []
+    for i in raw_content_id:
+        token_mask = (offset_map == i).unsqueeze(-1)  # find the ids of this content word in the tokenized sequence
+        token_embed = para_embed.masked_select(mask=token_mask).view(token_mask.sum(), BERT_HIDDEN_SIZE)
+        token_embed = torch.mean(token_embed, dim=0)
+        content_embed.append(token_embed)
 
-    # if the number of triples with weight >= 1.0 is large enough, then only select from these triples
-    if len(useful_triples_id) >= max:
-        useful_triples_embed = [triple_embed[idx] for idx in useful_triples_id]
-        similarity = [cos_similarity(para_embed, embed) for embed in useful_triples_embed]
-        topk_score, topk_id = torch.tensor(similarity).topk(k=min(max, len(similarity)), largest=True, sorted=True)
-        selected_triples = [raw_triples[useful_triples_id[int(idx)]] for idx in topk_id]
-        selected_triples = [selected_triples[j] + f', {topk_score[j].item():.4f}' for j in
-                            range(len(selected_triples))]  # append score to triple
-        useful_cnt += 1
+    # get embedding of the neighbor concept in each candidate triple
+    similarity = []
+    matched_words = []  # the matched word in the context to the neighbor concept
+    for i in range(total_triples):
+        triple = raw_triples[i]
+        offset_map = find_token_offset(origin_tokens=cand_sents[i].strip().split(),
+                                       tokens=tokenizer.convert_ids_to_tokens(input_ids[i], skip_special_tokens=True))
+        raw_neighbor_id = find_neighbor_in_sent(raw_triple=triple)  # find the ids of neighbor concept in original sentence
+        neighbor_id = [idx for idx in range(len(offset_map)) if offset_map[idx] in raw_neighbor_id]  # map ids to the tokenized sequence
+        embed = triple_embed[i].index_select(dim=0, index=torch.tensor(neighbor_id, dtype=torch.long))
+        assert embed.size() == (len(neighbor_id), BERT_HIDDEN_SIZE)
+        neighbor_embed = torch.mean(embed, dim=0)
+        content_sim = [cos_similarity(emb, neighbor_embed).item() for emb in content_embed]
+        matched_id = np.argmax(content_sim)
+        similarity.append(content_sim[matched_id])
+        matched_words.append(raw_content_word[matched_id])
 
-    else:
-        similarity = [cos_similarity(para_embed, embed) for embed in triple_embed]
-        topk_score, topk_id = torch.tensor(similarity).topk(k = min(max, len(similarity)), largest = True, sorted = True)
-        selected_triples = [raw_triples[int(idx)] for idx in topk_id]
-        selected_triples = [selected_triples[j]+f', {topk_score[j].item():.4f}' for j in
-                            range(len(selected_triples))]  # append score to triple
+    topk_score, topk_id = torch.tensor(similarity).topk(k=min(max_num, len(similarity)), largest=True, sorted=True)
+    selected_triples = [raw_triples[int(idx)] for idx in topk_id]
+    matched_words = [matched_words[int(idx)] for idx in topk_id]
+    selected_triples = [selected_triples[j] + f', {topk_score[j].item():.4f}, {matched_words[j]}'
+                        for j in range(len(selected_triples))]  # append score to triple
 
-    return selected_triples, topk_score
+    return selected_triples
 
 
 if __name__ == "__main__":
@@ -239,8 +324,8 @@ if __name__ == "__main__":
         raw_triples = triple2sent(raw_triples = raw_triples, rel_rules = rel_rules, trans_rules = trans_rules)
 
         # raw_triples may contain repetitive fields (multiple entities)
-        selected_triples, topk_scores = select_triple(tokenizer = tokenizer, model = model, raw_triples = list(set(raw_triples)),
-                                                      paragraph = paragraph, batch_size = opt.batch, max = opt.max, cuda = cuda)
+        selected_triples = select_triple(tokenizer = tokenizer, model = model, raw_triples = list(set(raw_triples)),
+                                         paragraph = paragraph, batch_size = opt.batch, max_num = opt.max, cuda = cuda)
 
         if len(selected_triples) < opt.max:
             less_cnt += 1
