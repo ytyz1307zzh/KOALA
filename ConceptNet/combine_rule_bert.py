@@ -14,7 +14,24 @@ from typing import List
 less_cnt = 0
 
 
-def combine_retrieval(bert_triples: List[str], rule_triples: List[str], max_num: int, para_id: int, entity: str) -> List[str]:
+def add_bert_identifier(triple: str) -> str:
+    fields = triple.strip().split(', ')
+    assert len(fields) == 12
+    fields.insert(9, 'BERT')
+    return ', '.join(fields)
+
+
+def check_duplicate(triple: str, result: List[str]) -> bool:
+    fields = triple.strip().split(', ')
+    assert len(fields) == 13
+    assert fields[9] == 'BERT'
+    psuedo_triple = fields[:11]
+    psuedo_triple[9] = 'RELEVANCE'
+    return ', '.join(psuedo_triple) in result
+
+
+def combine_retrieval(bert_triples: List[str], rule_triples: List[str], max_num: int,
+                      para_id: int, entity: str) -> (List[str], int, int):
     """
     Combine two sources of retrieved triples.
     Rule: relevance-based triples in rule_triples come first, the remainings are bert_triples.
@@ -35,18 +52,19 @@ def combine_retrieval(bert_triples: List[str], rule_triples: List[str], max_num:
         if source == 'RELEVANCE':
             result.append(rule_triples[i])
 
+    bert_cnt, rule_cnt = 0, len(result)
     if len(result) == max_num:  # if relevance-based triples already make up to max_num, then return
-        return result
+        return result, bert_cnt, rule_cnt
 
-    def add_bert_identifier(triple: str) -> str:
-        fields = triple.strip().split(', ')
-        assert len(fields) == 12
-        fields.insert(9, 'BERT')
-        return ', '.join(fields)
-
-    bert_result = bert_triples[:(max_num-len(result))]
-    bert_result = list(map(add_bert_identifier, bert_result))
-    result.extend(bert_result)
+    bert_triples = list(map(add_bert_identifier, bert_triples))
+    for j in range(bert_len):
+        # if this one has been retrieved in rule-based retrieval, skip it
+        if check_duplicate(triple=bert_triples[j], result=result):
+            continue
+        result.append(bert_triples[j])
+        bert_cnt += 1
+        if len(result) == max_num:
+            break
 
     global less_cnt
     if len(result) < max_num:
@@ -54,7 +72,7 @@ def combine_retrieval(bert_triples: List[str], rule_triples: List[str], max_num:
         less_cnt += 1
 
     assert len(result) <= max_num
-    return result
+    return result, bert_cnt, rule_cnt
 
 
 def main():
@@ -73,6 +91,8 @@ def main():
     data_len = len(bert_data)
 
     result = []
+    total_bert_cnt = 0
+    total_rule_cnt = 0
     for i in tqdm(range(data_len)):
         bert_inst = bert_data[i]
         rule_inst = rule_data[i]
@@ -86,8 +106,10 @@ def main():
         bert_triples = bert_inst['cpnet']
         rule_triples = rule_inst['cpnet']
 
-        combined_triples = combine_retrieval(bert_triples=bert_triples, rule_triples=rule_triples,
-                                             max_num=opt.max_num, para_id=para_id, entity=entity)
+        combined_triples, bert_cnt, rule_cnt = combine_retrieval(bert_triples=bert_triples, rule_triples=rule_triples,
+                                                                 max_num=opt.max_num, para_id=para_id, entity=entity)
+        total_bert_cnt += bert_cnt
+        total_rule_cnt += rule_cnt
 
         result.append({'id': para_id,
                        'entity': entity,
@@ -99,7 +121,9 @@ def main():
 
     json.dump(result, open(opt.output, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
     print(f'Total instances: {data_len}')
-    print(f'Instances with less than {opt.max} ConceptNet triples collected: {less_cnt} ({(less_cnt / data_len) * 100:.2f}%)')
+    print(f'Instances with less than {opt.max_num} ConceptNet triples collected: {less_cnt} ({(less_cnt / data_len) * 100:.2f}%)')
+    print(f'Average number of BERT-retrieved triples: {total_bert_cnt / data_len}')
+    print(f'Average number of rule-retrieved triples: {total_rule_cnt / data_len}')
     print('Finished.')
 
 
