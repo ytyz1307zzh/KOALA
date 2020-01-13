@@ -147,7 +147,7 @@ def main():
     parser.add_argument('-doc_stride', type=int, default=128,
                         help='when splitting up a long document into chunks, how much stride to take between chunks')
     parser.add_argument('-no_cuda', default=False, action='store_true', help='if specified, then only use cpu')
-    parser.add_argument('-pooling', default='max', choices=['max', 'mean'],
+    parser.add_argument('-pooling', default='mean', choices=['max', 'mean'],
                         help='pooling method to aggregate BERT word embeddings into sentence embedding')
     opt = parser.parse_args()
 
