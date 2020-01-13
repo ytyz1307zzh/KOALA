@@ -13,6 +13,7 @@ import time
 from transformers import BertModel, BertTokenizer
 import torch
 import torch.nn.functional as F
+BERT_BASE_HIDDEN = 768
 
 
 def get_weight(line: str) -> float:
@@ -96,7 +97,7 @@ def triple2sent(raw_triples: List[str], rel_rules: Dict[str, str], trans_rules: 
 
 
 def cos_similarity(vec1: torch.Tensor, vec2: torch.Tensor) -> torch.Tensor:
-    assert vec1.size() == vec2.size() == (768,)
+    assert vec1.size() == vec2.size() == (BERT_BASE_HIDDEN,)
     return F.cosine_similarity(vec1, vec2, dim=0)
 
 
@@ -154,8 +155,8 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
 
         _, _, hidden_states = outputs
         assert len(hidden_states) == 13
-        last_embed = hidden_states[-1]  # use the embedding from second-last BERT layer
-        assert last_embed.size() == (batch.size(0), batch.size(1), 768)
+        last_embed = hidden_states[-1]  # use the embedding from last BERT layer
+        assert last_embed.size() == (batch.size(0), batch.size(1), BERT_BASE_HIDDEN)
 
         for i in range(batch.size(0)):
             embedding = last_embed[i]  # (max_length, hidden_size)
@@ -174,8 +175,8 @@ def select_triple(tokenizer, model, raw_triples: List[str], paragraph: str,
     assert len(outputs) == 3
     _, _, hidden_states = outputs
     assert len(hidden_states) == 13
-    last_embed = hidden_states[-1]  # use the embedding from second-last BERT layer
-    assert last_embed.size() == (1, para_ids.size(1), 768)
+    last_embed = hidden_states[-1]  # use the embedding from last BERT layer
+    assert last_embed.size() == (1, para_ids.size(1), BERT_BASE_HIDDEN)
     para_embed = torch.mean(last_embed[0, 1:-1, :], dim=0)  # get rid of <CLS> (first token) and <SEP> (last token)
 
     global useful_cnt
