@@ -58,7 +58,8 @@ def get_max_context(doc_spans, position):
     return best_span_index
 
 
-def get_sentence_embed(tokenizer, model, sentence: str, cuda: bool, max_len: int, doc_stride: int):
+def get_sentence_embed(tokenizer, model, sentence: str, cuda: bool,
+                       max_len: int, doc_stride: int, pooling: str):
     
     sent_length = len(tokenizer.tokenize(sentence))
     all_spans = []
@@ -110,7 +111,12 @@ def get_sentence_embed(tokenizer, model, sentence: str, cuda: bool, max_len: int
     # pooling method to acquire the sentence embedding
     word_embed = torch.stack(word_embed, dim=0)
     assert word_embed.size() == (sent_length, BERT_BASE_HIDDEN)
-    sent_embed, _ = torch.max(word_embed, dim=0)  # TODO: max pooling or mean pooling?
+    if pooling == 'max':
+        sent_embed, _ = torch.max(word_embed, dim=0)
+    elif pooling == 'mean':
+        sent_embed = torch.mean(word_embed, dim=0)
+    else:
+        raise ValueError('Invalid pooling method!')
     assert sent_embed.size() == (BERT_BASE_HIDDEN,)
     
     return sent_embed
@@ -141,6 +147,8 @@ def main():
     parser.add_argument('-doc_stride', type=int, default=128,
                         help='when splitting up a long document into chunks, how much stride to take between chunks')
     parser.add_argument('-no_cuda', default=False, action='store_true', help='if specified, then only use cpu')
+    parser.add_argument('-pooling', default='max', choices=['max', 'mean'],
+                        help='pooling method to aggregate BERT word embeddings into sentence embedding')
     opt = parser.parse_args()
 
     raw_data = json.load(open(opt.input, 'r', encoding='utf8'))
@@ -164,7 +172,8 @@ def main():
 
         docs = [wiki['text'] for wiki in wiki_cands]
         topk_score, topk_id = select_topk_doc(tokenizer=tokenizer, model=model, query=paragraph,
-                                  docs=docs, max_num=opt.max, cuda=cuda, doc_stride=opt.doc_stride)
+                                              docs=docs, max_num=opt.max, cuda=cuda,
+                                              doc_stride=opt.doc_stride, pooling=opt.pooling)
 
         selected_wiki = [wiki_cands[idx] for idx in topk_id]
         assert len(selected_wiki) == opt.max
