@@ -39,7 +39,7 @@ def main():
             para_data = {
                 'qas': qas,
                 'context_para': [[0, len(context)]],
-                'para_labels': [0],
+                'para_labels': ['0'],
                 'keep_or_not': [True],
                 'title': wiki_title,
                 'context': context,
