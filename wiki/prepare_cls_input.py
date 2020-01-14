@@ -12,7 +12,7 @@ from tqdm import tqdm
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-input', type=str, default='./wiki_para.json', help='data candidates, rough retrieval from wiki')
-    parser.add_argument('-output', type=str, default='./nq-classifier/input.json', help='output file to store the processed data')
+    parser.add_argument('-output', type=str, default='./nq-classifier/dev.json.sent', help='output file to store the processed data')
     opt = parser.parse_args()
 
     raw_data = json.load(open(opt.input, 'r', encoding='utf8'))
@@ -38,9 +38,9 @@ def main():
 
             para_data = {
                 'qas': qas,
-                'context_para': [0, len(context)],
-                'para_labels': 0,
-                'keep_or_not': True,
+                'context_para': [[0, len(context)]],
+                'para_labels': [0],
+                'keep_or_not': [True],
                 'title': wiki_title,
                 'context': context,
             }
