@@ -214,7 +214,7 @@ class ConvertData2ParagraphClsInput(object):
                        'entity': entities[qidx],
                        'topic': topics[qidx],
                        'prompt': prompts[qidx],
-                       'paragraph': queries[qidx]
+                       'paragraph': paragraphs[qidx]
                        }
             matched_para = []
             distant_num = 0
