@@ -9,14 +9,21 @@ import json
 from tqdm import tqdm
 from typing import List, Dict
 import time
-from transformers import BertModel, BertTokenizer
+from transformers import BertModel, BertTokenizer, RobertaTokenizer, RobertaModel
 import torch
 import torch.nn.functional as F
-BERT_BASE_HIDDEN = 768
+MODEL_CLASSES = {
+    'bert': (BertModel, BertTokenizer),
+    'roberta': (RobertaModel, RobertaTokenizer),
+}
+model_hidden = {'bert-base-uncased': 768, 'bert-large-uncased': 1024, 'roberta-base': 768, 'roberta-large': 1024}
+model_layers = {'bert-base-uncased': 12, 'bert-large-uncased': 24, 'roberta-base': 12, 'roberta-large': 24}
+HIDDEN_SIZE = 0
+NUM_LAYERS = 0
 
 
 def cos_similarity(vec1: torch.Tensor, vec2: torch.Tensor) -> torch.Tensor:
-    assert vec1.size() == vec2.size() == (BERT_BASE_HIDDEN,)
+    assert vec1.size() == vec2.size() == (HIDDEN_SIZE,)
     return F.cosine_similarity(vec1, vec2, dim=0)
 
 
@@ -28,9 +35,9 @@ def get_span_embed(model, sent_ids: torch.Tensor, cuda: bool):
 
     assert len(outputs) == 3
     _, _, hidden_states = outputs
-    assert len(hidden_states) == 13
+    assert len(hidden_states) == NUM_LAYERS + 1
     last_embed = hidden_states[-1]
-    assert last_embed.size() == (1, sent_ids.size(1), BERT_BASE_HIDDEN)
+    assert last_embed.size() == (1, sent_ids.size(1), HIDDEN_SIZE)
     sent_embed = last_embed[0, 1:-1, :]  # get rid of <CLS> (first token) and <SEP> (last token)
 
     return sent_embed
@@ -110,29 +117,31 @@ def get_sentence_embed(tokenizer, model, sentence: str, cuda: bool,
 
     # pooling method to acquire the sentence embedding
     word_embed = torch.stack(word_embed, dim=0)
-    assert word_embed.size() == (sent_length, BERT_BASE_HIDDEN)
+    assert word_embed.size() == (sent_length, HIDDEN_SIZE)
     if pooling == 'max':
         sent_embed, _ = torch.max(word_embed, dim=0)
     elif pooling == 'mean':
         sent_embed = torch.mean(word_embed, dim=0)
     else:
         raise ValueError('Invalid pooling method!')
-    assert sent_embed.size() == (BERT_BASE_HIDDEN,)
+    assert sent_embed.size() == (HIDDEN_SIZE,)
     
     return sent_embed
 
 
 def select_topk_doc(tokenizer, model, query: str, docs: List[str],
-                    max_num: int, cuda: bool, doc_stride: int) -> (List[int], List[int]):
+                    max_num: int, cuda: bool, doc_stride: int, pooling: str) -> (List[int], List[int]):
     """
     Select the k most similar wiki paragraphs to the given query, based on doc embedding.
     """
     doc_embed = []
     chunk_len = tokenizer.max_len
     for doc in docs:
-        doc_embed.append(get_sentence_embed(tokenizer, model, sentence=doc, cuda=cuda, max_len=chunk_len, doc_stride=doc_stride))
+        doc_embed.append(get_sentence_embed(tokenizer, model, sentence=doc, cuda=cuda, max_len=chunk_len,
+                                            doc_stride=doc_stride, pooling=pooling))
 
-    query_embed = get_sentence_embed(tokenizer, model, sentence=query, cuda=cuda, max_len=chunk_len, doc_stride=doc_stride)
+    query_embed = get_sentence_embed(tokenizer, model, sentence=query, cuda=cuda, max_len=chunk_len,
+                                     doc_stride=doc_stride, pooling=pooling)
     similarity = [cos_similarity(query_embed, embed) for embed in doc_embed]
     topk_score, topk_id = torch.tensor(similarity).topk(k=max_num, largest=True, sorted=True)
 
@@ -143,6 +152,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-input', type=str, default='./wiki_para.json', help='path to the english conceptnet')
     parser.add_argument('-output', type=str, default='./result/retrieval_embed.json', help='path to store the generated graph')
+    parser.add_argument('-model_class', type=str, required=True, help='transformer model class')
+    parser.add_argument('-model_name', type=str, required=True, help='transformer model name')
     parser.add_argument('-max', type=int, default=5, help='how many triples to collect')
     parser.add_argument('-doc_stride', type=int, default=128,
                         help='when splitting up a long document into chunks, how much stride to take between chunks')
@@ -150,15 +161,23 @@ def main():
     parser.add_argument('-pooling', default='mean', choices=['max', 'mean'],
                         help='pooling method to aggregate BERT word embeddings into sentence embedding')
     opt = parser.parse_args()
+    print(opt)
+
+    assert opt.model_name in model_hidden.keys(), 'Wrong model name provided'
+    global HIDDEN_SIZE
+    global NUM_LAYERS
+    HIDDEN_SIZE = model_hidden[opt.model_name]
+    NUM_LAYERS = model_layers[opt.model_name]
+    model_class, tokenizer_class = MODEL_CLASSES[opt.model_class]
 
     raw_data = json.load(open(opt.input, 'r', encoding='utf8'))
     cuda = False if opt.no_cuda else True
     result = []
 
-    print('[INFO] Loading pretrained BERT...')
+    print(f'[INFO] Loading pretrained {opt.model_name}...')
     start_time = time.time()
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertModel.from_pretrained('bert-base-uncased', output_hidden_states=True)
+    tokenizer = tokenizer_class.from_pretrained(opt.model_name)
+    model = model_class.from_pretrained(opt.model_name, output_hidden_states=True)
     if cuda:
         model.cuda()
     print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
@@ -187,7 +206,7 @@ def main():
                        'wiki': selected_wiki
                        })
 
-    json.dump(result, open(opt.output, 'w', encoding='utf8'), indent=4, ensure_ascii=False)
+    # json.dump(result, open(opt.output, 'w', encoding='utf8'), indent=4, ensure_ascii=False)
 
 
 if __name__ == "__main__":
