@@ -156,7 +156,8 @@ def main():
     parser.add_argument('-model_class', type=str, required=True, help='transformer model class')
     parser.add_argument('-model_name', type=str, required=True, help='transformer model name')
     parser.add_argument('-embed_layer', type=int, default=-1,
-                        help='the output of which layer would you like to use as final embedding, -1: last layer, -2: second last, etc.')
+                        help='the output of which layer would you like to use as final embedding, '
+                             '-1: last layer, -2: second last, 0: embedding layer, 1: first layer, etc.')
     parser.add_argument('-pooling', default='mean', choices=['max', 'mean'],
                         help='pooling method to aggregate BERT word embeddings into sentence embedding')
     parser.add_argument('-max', type=int, default=5, help='how many triples to collect')

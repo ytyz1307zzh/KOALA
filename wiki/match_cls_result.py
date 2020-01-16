@@ -29,6 +29,8 @@ def main():
     score = [logits[1] for logits in cls_logits]  # get the score of positive label, larger is better
     output = []
 
+    assert len(score) == len(raw_data) * opt.num_cands
+
     for inst_idx in tqdm(range(len(raw_data))):
         instance = raw_data[inst_idx]
         prompt = instance['prompt']
