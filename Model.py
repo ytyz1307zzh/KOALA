@@ -406,7 +406,7 @@ class FixedSentEncoder(nn.Module):
         self.cuda = cuda
 
 
-    def forward(self, input: str):
+    def forward(self, input: List[List[str]]):
         """
         Args:
             input: size(batch, 10), each is a list of untokenized strings.
