@@ -56,6 +56,12 @@ parser.add_argument('-restore', type=str, default=None, help="restoring model pa
 parser.add_argument('-dummy_test', type=str, default="data/dummy-predictions.tsv", help="path to dummy prediction file")
 parser.add_argument('-output', type=str, default=None, help="path to store prediction outputs")
 
+# commonsense parameters
+parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
+parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
+parser.add_argument('-cpnet_enc_class', type=str, default='roberta', help='conceptnet encoder class')
+parser.add_argument('-cpnet_enc_name', type=str, default='roberta-large', help='conceptnet encoder name')
+
 # other parameters
 parser.add_argument('-debug', action='store_true', default=False, help="enable debug mode, change data files to debug data")
 parser.add_argument('-no_cuda', action='store_true', default=False, help="if true, will only use cpu")

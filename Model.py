@@ -13,6 +13,7 @@ import time
 import numpy as np
 from typing import List, Dict
 from Constants import *
+import itertools
 from utils import *
 from allennlp.modules.elmo import Elmo
 from torchcrf import CRF
@@ -384,6 +385,75 @@ class LocationPredictor(nn.Module):
 
         assert masked_mean.size() == (batch_size, max_sents, 2 * self.hidden_size)
         return masked_mean
+
+
+class FixedSentEncoder(nn.Module):
+    """
+    A encoder that acquires sentence embedding from a fixed pretrained language model
+    """
+    def __init__(self, model_class: str, model_name: str, cuda: bool):
+        super(FixedSentEncoder, self).__init__()
+        assert model_name in MODEL_HIDDEN.keys(), 'Wrong model name provided'
+        model_class, tokenizer_class = MODEL_CLASSES[model_class]
+        self.hidden_size = MODEL_HIDDEN[model_name]
+
+        print(f'[INFO] Loading pretrained {model_name}...')
+        start_time = time.time()
+        self.tokenizer = tokenizer_class.from_pretrained(model_name)
+        self.encoder = model_class.from_pretrained(model_name)
+        print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
+
+        self.cuda = cuda
+
+
+    def forward(self, input: str):
+        """
+        Args:
+            input: size(batch, 10), each is a list of untokenized strings.
+        """
+        batch_size = len(input)
+        num_cands = len(input[0])
+        all_sents = itertools.chain.from_iterable(input)  # batch * num_cands
+        input_ids = list(map(lambda s: self.tokenizer.encode(s, add_special_tokens=True), all_sents))
+        input_ids, attention_mask, max_len = self.pad_to_longest(batch=input_ids, pad_id=self.tokenizer.pad_token_id)
+
+        if self.cuda:
+            input_ids = input_ids.cuda()
+            attention_mask = attention_mask.cuda()
+
+        with torch.no_grad():
+            outputs = self.encoder(input_ids, attention_mask=attention_mask)
+
+        last_hidden = outputs[0]  # (batch*num_cands, seq_len, hidden_size)
+        assert last_hidden.size() == (batch_size * num_cands, max_len, self.hidden_size)
+
+        sent_embed = []
+        for i in range(last_hidden.size(0)):
+            embedding = last_hidden[i]  # (max_length, hidden_size)
+            pad_mask = attention_mask[i]
+            num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
+            token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
+            sent_embed.append(torch.mean(token_embed, dim=0))
+        sent_embed = torch.stack(sent_embed, dim=0)
+        assert sent_embed.size() == (batch_size * num_cands, self.hidden_size)
+
+        return sent_embed.view(batch_size, num_cands, self.hidden_size)
+
+
+    def pad_to_longest(self, batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTensor):
+        """
+        Pad the sentences to the longest length in a batch
+        """
+        batch_size = len(batch)
+        max_length = max([len(batch[i]) for i in range(batch_size)])
+
+        pad_batch = [batch[i] + [pad_id for _ in range(max_length - len(batch[i]))] for i in range(batch_size)]
+        pad_batch = torch.tensor(pad_batch, dtype=torch.long)
+        # avoid computing attention on padding tokens
+        attention_mask = torch.ones_like(pad_batch).masked_fill(mask=(pad_batch==pad_id), value=0)
+        assert pad_batch.size() == attention_mask.size() == (batch_size, max_length)
+
+        return pad_batch, attention_mask, max_length
 
 
 class Linear(nn.Module):
