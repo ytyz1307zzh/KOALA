@@ -43,6 +43,24 @@ class ProparaDataset(torch.utils.data.Dataset):
         return [1 if i in mention_idx else 0 for i in range(para_len)]
 
 
+    def get_sentence_mask(self, sentence_list: List, para_len: int):
+        """
+        Get the indexes of a given sentence.
+        """
+        sentence_masks = []
+        sentence_lengths = [x['total_tokens'] for x in sentence_list]
+        assert sum(sentence_lengths) == para_len
+        prev_tokens = 0
+
+        for length in sentence_lengths:
+            mask = [0 for _ in range(prev_tokens)] + [1 for _ in range(length)] + [0 for _ in range(
+                para_len - prev_tokens - length)]
+            sentence_masks.append(mask)
+            prev_tokens += length
+
+        return sentence_masks
+
+
     def __getitem__(self, index: int):
 
         instance = self.dataset[index]
@@ -81,6 +99,8 @@ class ProparaDataset(torch.utils.data.Dataset):
         assert total_sents == len(sentence_list)
 
         # (num_sent, num_tokens)
+        sentence_mask_list = torch.IntTensor(self.get_sentence_mask(sentence_list, total_tokens))
+        # (num_sent, num_tokens)
         entity_mask_list = torch.IntTensor([self.get_mask(sent['entity_mention'], total_tokens) for sent in sentence_list])
         # (num_sent, num_tokens)
         verb_mask_list = torch.IntTensor([self.get_mask(sent['verb_mention'], total_tokens) for sent in sentence_list])
@@ -93,6 +113,7 @@ class ProparaDataset(torch.utils.data.Dataset):
                   'sentences': sentences,
                   'gold_loc_seq': gold_loc_seq,
                   'gold_state_seq': gold_state_seq,
+                  'sentence_mask': sentence_mask_list,
                   'entity_mask': entity_mask_list,
                   'verb_mask': verb_mask_list,
                   'loc_mask': loc_mask_list
@@ -143,6 +164,7 @@ class Collate:
         sentences = list(map(lambda x: x['sentences'], batch))
         gold_loc_seq = torch.stack(list(map(lambda x: x['gold_loc_seq'], batch)))
         gold_state_seq = torch.stack(list(map(lambda x: x['gold_state_seq'], batch)))
+        sentence_mask = torch.stack(list(map(lambda x: x['sentence_mask'], batch)))
         entity_mask = torch.stack(list(map(lambda x: x['entity_mask'], batch)))
         verb_mask = torch.stack(list(map(lambda x: x['verb_mask'], batch)))
         loc_mask = torch.stack(list(map(lambda x: x['loc_mask'], batch)))
@@ -150,7 +172,7 @@ class Collate:
         # check the dimension of the data
         assert len(metadata) == len(paragraph) == batch_size
         assert gold_loc_seq.size() == gold_state_seq.size() == (batch_size, max_sents)
-        assert entity_mask.size() == verb_mask.size() == (batch_size, max_sents, max_tokens)
+        assert sentence_mask.size() == entity_mask.size() == verb_mask.size() == (batch_size, max_sents, max_tokens)
         assert loc_mask.size() == (batch_size, max_cands, max_sents, max_tokens)
 
         return {'metadata': metadata,
@@ -158,6 +180,7 @@ class Collate:
                 'sentences': sentences,  # unpadded, 2-dimension
                 'gold_loc_seq': gold_loc_seq,
                 'gold_state_seq': gold_state_seq,
+                'sentence_mask': sentence_mask,
                 'entity_mask': entity_mask,
                 'verb_mask': verb_mask,
                 'loc_mask': loc_mask
@@ -175,7 +198,8 @@ class Collate:
         """
         instance['gold_state_seq'] = self.pad_tensor(instance['gold_state_seq'], pad = max_sents, dim = 0, pad_val = PAD_STATE)
         instance['gold_loc_seq'] = self.pad_tensor(instance['gold_loc_seq'], pad = max_sents, dim = 0, pad_val = PAD_LOC)
-        
+
+        instance['sentence_mask'] = self.pad_mask_list(instance['sentence_mask'], max_sents = max_sents, max_tokens = max_tokens)
         instance['entity_mask'] = self.pad_mask_list(instance['entity_mask'], max_sents = max_sents, max_tokens = max_tokens)
         instance['verb_mask'] = self.pad_mask_list(instance['verb_mask'], max_sents = max_sents, max_tokens = max_tokens)
         instance['loc_mask'] = self.pad_mask_list(instance['loc_mask'], max_sents = max_sents,
