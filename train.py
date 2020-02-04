@@ -112,19 +112,19 @@ def save_model(path: str, model: nn.Module):
 
 def train():
 
-    train_set = ProparaDataset(opt.train_set, is_test = False)
+    train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet, is_test = False)
     shuffle_train = True
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch training set to debug.json' + '*'*20)
-        train_set = ProparaDataset('data/debug.json', is_test = False)
+        train_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, is_test = False)
         shuffle_train = False
 
     train_batch = DataLoader(dataset = train_set, batch_size = opt.batch_size, shuffle = shuffle_train, collate_fn = Collate())
-    dev_set = ProparaDataset(opt.dev_set, is_test = False)
+    dev_set = ProparaDataset(opt.dev_set, cpnet_path=opt.cpnet, is_test = False)
 
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch dev set to debug.json' + '*'*20)
-        dev_set = ProparaDataset('data/debug.json', is_test = False)
+        dev_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, is_test = False)
 
     model = NCETModel(opt = opt, is_test = False)
     if not opt.no_cuda:
@@ -406,11 +406,11 @@ if __name__ == "__main__":
             print('*' * 20 + '[INFO] Debug mode enabled. Switch dummy file to data/dummy-debug.json' + '*' * 20)
             opt.dummy_test = 'data/dummy-debug.tsv'
 
-        test_set = ProparaDataset(opt.test_set, is_test=True)
+        test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet, is_test=True)
 
         if opt.debug:
             print('*' * 20 + '[INFO] Debug mode enabled. Switch test set to debug.json' + '*' * 20)
-            test_set = ProparaDataset('data/debug.json', is_test=True)
+            test_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, is_test=True)
 
         print('[INFO] Start loading trained model...')
         restore_start_time = time.time()

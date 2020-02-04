@@ -16,7 +16,7 @@ from Constants import *
 
 class ProparaDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_path: str, is_test: bool):
+    def __init__(self, data_path: str, cpnet_path: str, is_test: bool):
         super(ProparaDataset, self).__init__()
 
         print('[INFO] Starting load...')
@@ -24,6 +24,7 @@ class ProparaDataset(torch.utils.data.Dataset):
         start_time = time.time()
 
         self.dataset = json.load(open(data_path, 'r', encoding='utf-8'))
+        self.cpnet = self.read_cpnet(cpnet_path)
         self.state2idx = state2idx
         self.idx2state = idx2state
         self.is_test = is_test
@@ -33,6 +34,18 @@ class ProparaDataset(torch.utils.data.Dataset):
     
     def __len__(self):
         return len(self.dataset)
+
+
+    def read_cpnet(self, cpnet_path: str):
+        cpnet = json.load(open(cpnet_path, 'r', encoding='utf-8'))
+        cpnet_dict = {}
+
+        for instance in cpnet:
+            para_id = instance['id']
+            entity = instance['entity']
+            cpnet_dict[f'{para_id}-{entity}'] = instance
+
+        return cpnet_dict
 
 
     def get_mask(self, mention_idx: List[int], para_len: int) -> List[int]:
@@ -59,6 +72,12 @@ class ProparaDataset(torch.utils.data.Dataset):
             prev_tokens += length
 
         return sentence_masks
+
+
+    def find_cpnet(self, para_id: int, entity: str):
+        cpnet_triples = self.cpnet[f'{para_id}-{entity}']['cpnet']
+        cpnet_sentences = [triple.split(', ')[10] for triple in cpnet_triples]
+        return cpnet_sentences
 
 
     def __getitem__(self, index: int):
@@ -108,6 +127,8 @@ class ProparaDataset(torch.utils.data.Dataset):
         loc_mask_list = torch.IntTensor([[self.get_mask(sent['loc_mention_list'][idx], total_tokens) for sent in sentence_list]
                                             for idx in range(total_loc_cands)])
 
+        cpnet_triples = self.find_cpnet(para_id=para_id, entity=entity_name)
+
         sample = {'metadata': metadata,
                   'paragraph': paragraph,
                   'sentences': sentences,
@@ -116,7 +137,8 @@ class ProparaDataset(torch.utils.data.Dataset):
                   'sentence_mask': sentence_mask_list,
                   'entity_mask': entity_mask_list,
                   'verb_mask': verb_mask_list,
-                  'loc_mask': loc_mask_list
+                  'loc_mask': loc_mask_list,
+                  'cpnet': cpnet_triples
                 }
 
         return sample
@@ -152,16 +174,19 @@ class Collate:
         max_sents = max([inst['metadata']['total_sents'] for inst in batch])
         max_tokens = max([len(inst['paragraph']) for inst in batch])
         max_cands = max([inst['metadata']['total_loc_cands'] for inst in batch])
+        max_cpnet = max([len(inst['cpnet']) for inst in batch])
         batch_size = len(batch)
 
         # pad according to max_len
         batch = list(map(lambda x: self.pad_instance(x, max_sents = max_sents, 
                                                         max_tokens = max_tokens, 
-                                                        max_cands = max_cands), batch))
+                                                        max_cands = max_cands,
+                                                        max_cpnet = max_cpnet), batch))
 
         metadata = list(map(lambda x: x['metadata'], batch))
         paragraph = list(map(lambda x: x['paragraph'], batch))
         sentences = list(map(lambda x: x['sentences'], batch))
+        cpnet = list(map(lambda x: x['cpnet'], batch))
         gold_loc_seq = torch.stack(list(map(lambda x: x['gold_loc_seq'], batch)))
         gold_state_seq = torch.stack(list(map(lambda x: x['gold_state_seq'], batch)))
         sentence_mask = torch.stack(list(map(lambda x: x['sentence_mask'], batch)))
@@ -170,7 +195,7 @@ class Collate:
         loc_mask = torch.stack(list(map(lambda x: x['loc_mask'], batch)))
 
         # check the dimension of the data
-        assert len(metadata) == len(paragraph) == batch_size
+        assert len(metadata) == len(paragraph) == len(sentences) == len(cpnet) == batch_size
         assert gold_loc_seq.size() == gold_state_seq.size() == (batch_size, max_sents)
         assert sentence_mask.size() == entity_mask.size() == verb_mask.size() == (batch_size, max_sents, max_tokens)
         assert loc_mask.size() == (batch_size, max_cands, max_sents, max_tokens)
@@ -183,11 +208,12 @@ class Collate:
                 'sentence_mask': sentence_mask,
                 'entity_mask': entity_mask,
                 'verb_mask': verb_mask,
-                'loc_mask': loc_mask
+                'loc_mask': loc_mask,
+                'cpnet': cpnet
                 }
 
-    
-    def pad_instance(self, instance: Dict, max_sents: int, max_tokens: int, max_cands: int) -> Dict:
+    def pad_instance(self, instance: Dict, max_sents: int, max_tokens: int,
+                     max_cands: int, max_cpnet: int) -> Dict:
         """
         Pad the data fields of a certain instance.
 
@@ -204,6 +230,8 @@ class Collate:
         instance['verb_mask'] = self.pad_mask_list(instance['verb_mask'], max_sents = max_sents, max_tokens = max_tokens)
         instance['loc_mask'] = self.pad_mask_list(instance['loc_mask'], max_sents = max_sents,
                                                      max_tokens = max_tokens, max_cands = max_cands)
+
+        instance['cpnet'] = self.pad_cpnet(instance['cpnet'], max_num = max_cpnet)
 
         return instance
 
@@ -240,5 +268,12 @@ class Collate:
             pad_vec.fill_(pad_val)
 
         return torch.cat([vec, pad_vec], dim = dim)
+
+
+    def pad_cpnet(self, data: List[str], max_num: int):
+        """
+        Pad the cpnet triples to max number.
+        """
+        return data + ['' for _ in range(max_num - len(data))]
 
         
