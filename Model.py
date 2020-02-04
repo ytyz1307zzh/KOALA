@@ -400,21 +400,20 @@ class GatedAttnUpdate(nn.Module):
         self.value_size = value_size
         self.input_size = input_size
 
-        attn_vec = torch.empty(query_size + value_size)
-        lim = 1 / value_size
-        nn.init.uniform_(attn_vec, -math.sqrt(lim), math.sqrt(lim))
+        attn_vec = torch.empty(query_size, value_size)
+        nn.init.xavier_normal_(attn_vec)
         self.attn_vec = nn.Parameter(attn_vec, requires_grad=True)
 
         self.gate_fc = Linear(input_size + value_size, input_size, dropout=dropout)
         self.concat_fc = Linear(input_size + value_size, input_size, dropout=dropout)
         self.Dropout = nn.Dropout(p=dropout)
 
-    def forward(self, query, values, input, attn_mask):
+    def forward(self, query, values, ori_input, attn_mask):
         """
         :param query: (batch, query_size)
         :param values: (batch, num_cands, value_size)
         :param attn_mask: (batch, num_cands), 0 for pad values
-        :param input: (batch, input_size), input vector to be merged with context vector
+        :param ori_input: (batch, input_size), input vector to be merged with context vector
         :return:
         """
         assert query.size(0) == values.size(0)
@@ -423,12 +422,13 @@ class GatedAttnUpdate(nn.Module):
         num_cands = values.size(1)
         assert query.size(-1) == self.query_size
         assert values.size(-1) == self.value_size
-        assert input.size(-1) == self.input_size
+        assert ori_input.size(-1) == self.input_size
 
         # attention
-        query = query.unsqueeze(1).expand(-1, num_cands, -1)
-        S = torch.cat([query, values], dim=-1)  # (batch, num_cands, query_size + value_size)
-        S = torch.matmul(S, self.attn_vec).squeeze()  # similarity score, (batch, num_cands)
+        query = query.unsqueeze(1)  # (batch, 1, query_size)
+        attn_vec = self.attn_vec.unsqueeze(0).expand(batch_size, -1, -1)  # (batch, query_size, value_size)
+        S = torch.bmm(torch.bmm(query, attn_vec), values.transpose(1, 2))  # similarity score, (batch, 1, num_cands)
+        S = S.squeeze()
         S = S.masked_fill(attn_mask == 0, float('-inf'))
         probs = F.softmax(S, dim=-1)
         probs = self.Dropout(probs)
@@ -436,10 +436,10 @@ class GatedAttnUpdate(nn.Module):
         assert C.size() == (batch_size, self.value_size)
 
         # gate
-        concat_vec = torch.cat([input, C], dim=-1)
+        concat_vec = torch.cat([ori_input, C], dim=-1)
         gate_vec = F.sigmoid(self.gate_fc(concat_vec))
         cand_input = self.concat_fc(concat_vec)
-        final_input = torch.mul(gate_vec, cand_input) + torch.mul(1 - gate_vec, input)
+        final_input = torch.mul(gate_vec, cand_input) + torch.mul(1 - gate_vec, ori_input)
         assert final_input.size() == (batch_size, self.input_size)
 
         return final_input
