@@ -7,7 +7,9 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import json
+import math
 import os
 import time
 import numpy as np
@@ -387,11 +389,67 @@ class LocationPredictor(nn.Module):
         return masked_mean
 
 
+class GatedAttnUpdate(nn.Module):
+    """
+    Attention + gate update
+    """
+
+    def __init__(self, query_size: int, value_size: int, input_size: int, dropout: float):
+        super(GatedAttnUpdate, self).__init__()
+        self.query_size = query_size
+        self.value_size = value_size
+        self.input_size = input_size
+
+        attn_vec = torch.empty(query_size + value_size)
+        lim = 1 / value_size
+        nn.init.uniform_(attn_vec, -math.sqrt(lim), math.sqrt(lim))
+        self.attn_vec = nn.Parameter(attn_vec, requires_grad=True)
+
+        self.gate_fc = Linear(input_size + value_size, input_size, dropout=dropout)
+        self.concat_fc = Linear(input_size + value_size, input_size, dropout=dropout)
+        self.Dropout = nn.Dropout(p=dropout)
+
+    def forward(self, query, values, input, attn_mask):
+        """
+        :param query: (batch, query_size)
+        :param values: (batch, num_cands, value_size)
+        :param attn_mask: (batch, num_cands), 0 for pad values
+        :param input: (batch, input_size), input vector to be merged with context vector
+        :return:
+        """
+        assert query.size(0) == values.size(0)
+        assert len(query.size()) == 2, len(values.size()) == 3
+        batch_size = query.size(0)
+        num_cands = values.size(1)
+        assert query.size(-1) == self.query_size
+        assert values.size(-1) == self.value_size
+        assert input.size(-1) == self.input_size
+
+        # attention
+        query = query.unsqueeze(1).expand(-1, num_cands, -1)
+        S = torch.cat([query, values], dim=-1)  # (batch, num_cands, query_size + value_size)
+        S = torch.matmul(S, self.attn_vec).squeeze()  # similarity score, (batch, num_cands)
+        S = S.masked_fill(attn_mask == 0, float('-inf'))
+        probs = F.softmax(S, dim=-1)
+        probs = self.Dropout(probs)
+        C = torch.bmm(probs.unsqueeze(1), values).squeeze()  # weighted sum, (batch, value_size)
+        assert C.size() == (batch_size, self.value_size)
+
+        # gate
+        concat_vec = torch.cat([input, C], dim=-1)
+        gate_vec = F.sigmoid(self.gate_fc(concat_vec))
+        cand_input = self.concat_fc(concat_vec)
+        final_input = torch.mul(gate_vec, cand_input) + torch.mul(1 - gate_vec, input)
+        assert final_input.size() == (batch_size, self.input_size)
+
+        return final_input
+
+
 class FixedSentEncoder(nn.Module):
     """
     A encoder that acquires sentence embedding from a fixed pretrained language model
     """
-    def __init__(self, model_class: str, model_name: str, cuda: bool):
+    def __init__(self, model_class: str, model_name: str, dropout: float, cuda: bool):
         super(FixedSentEncoder, self).__init__()
         assert model_name in MODEL_HIDDEN.keys(), 'Wrong model name provided'
         model_class, tokenizer_class = MODEL_CLASSES[model_class]
@@ -404,6 +462,7 @@ class FixedSentEncoder(nn.Module):
         print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
 
         self.cuda = cuda
+        self.Dropout = nn.Dropout(p=dropout)
 
 
     def forward(self, input: List[List[str]]):
@@ -436,6 +495,7 @@ class FixedSentEncoder(nn.Module):
             sent_embed.append(torch.mean(token_embed, dim=0))
         sent_embed = torch.stack(sent_embed, dim=0)
         assert sent_embed.size() == (batch_size * num_cands, self.hidden_size)
+        sent_embed = self.Dropout(sent_embed)
 
         return sent_embed.view(batch_size, num_cands, self.hidden_size)
 
