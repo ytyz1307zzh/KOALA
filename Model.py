@@ -71,7 +71,8 @@ class NCETModel(nn.Module):
 
         # state cheng prediction
         # size (batch, max_sents, NUM_STATES)
-        tag_logits = self.StateTracker(encoder_out = token_rep, entity_mask = entity_mask, verb_mask = verb_mask)
+        tag_logits = self.StateTracker(encoder_out = token_rep, entity_mask = entity_mask, verb_mask = verb_mask,
+                                       sentence_mask = sentence_mask, cpnet_triples = cpnet_triples)
         tag_mask = (gold_state_seq != PAD_STATE) # mask the padded part so they won't count in loss
         log_likelihood = self.CRFLayer(emissions = tag_logits, tags = gold_state_seq.long(), mask = tag_mask, reduction = 'token_mean')
 
@@ -400,6 +401,7 @@ class CpnetMemory(nn.Module):
     def __init__(self, opt, query_size: int, input_size: int):
         super(CpnetMemory, self).__init__()
         self.cuda = not opt.no_cuda
+        self.hidden_size = opt.hidden_size
         self.CpnetEncoder = FixedSentEncoder(model_class=opt.cpnet_enc_class, model_name=opt.cpnet_enc_name,
                                              dropout=opt.dropout, cuda=self.cuda)
         self.query_size = query_size
@@ -508,7 +510,7 @@ class GatedAttnUpdate(nn.Module):
         # similarity score, (batch, max_sents, num_cands)
         S = torch.bmm(torch.bmm(query, attn_vec), values.transpose(1, 2))
         if attn_mask is not None:
-            attn_mask = attn_mask.squeeze(1)
+            attn_mask = attn_mask.unsqueeze(1)
             S = S.masked_fill(attn_mask == 0, float('-inf'))
         probs = F.softmax(S, dim=-1)  # attention weights, (batch, max_sents, num_cands)
         probs = self.Dropout(probs)
