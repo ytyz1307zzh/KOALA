@@ -168,16 +168,19 @@ def train():
 
             paragraphs = batch['paragraph']
             char_paragraph = batch_to_ids(paragraphs)
+            sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
             loc_mask = batch['loc_mask']
             gold_loc_seq = batch['gold_loc_seq']
             gold_state_seq = batch['gold_state_seq']
+            cpnet_triples = batch['cpnet']
             metadata = batch['metadata']
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
             if not opt.no_cuda:
                 char_paragraph = char_paragraph.cuda()
+                sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
                 loc_mask = loc_mask.cuda()
@@ -187,7 +190,7 @@ def train():
 
             train_result = model(char_paragraph = char_paragraph, entity_mask = entity_mask, verb_mask = verb_mask,
                                  loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
-                                 num_cands = num_cands)
+                                 num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples)
 
             train_state_loss, train_loc_loss, train_state_correct, train_state_pred,\
                 train_loc_correct, train_loc_pred = train_result

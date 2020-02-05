@@ -38,7 +38,7 @@ class NCETModel(nn.Module):
         self.Dropout = nn.Dropout(p = opt.dropout)
 
         # state tracking modules
-        self.StateTracker = StateTracker(hidden_size = opt.hidden_size, dropout = opt.dropout)
+        self.StateTracker = StateTracker(opt)
         self.CRFLayer = CRF(NUM_STATES, batch_first = True)
 
         # location prediction modules
@@ -50,7 +50,7 @@ class NCETModel(nn.Module):
 
     def forward(self, char_paragraph: torch.Tensor, entity_mask: torch.IntTensor, verb_mask: torch.IntTensor,
                 loc_mask: torch.IntTensor, gold_loc_seq: torch.IntTensor, gold_state_seq: torch.IntTensor,
-                num_cands: torch.IntTensor):
+                num_cands: torch.IntTensor, sentence_mask: torch.IntTensor, cpnet_triples: List):
         """
         Args:
             gold_loc_seq: size (batch, max_sents)
@@ -199,27 +199,33 @@ class StateTracker(nn.Module):
     """
     State tracking decoder: sentence-level Bi-LSTM + linear + CRF
     """
-    def __init__(self, hidden_size: int, dropout: float):
+    def __init__(self, opt: argparse.Namespace):
 
         super(StateTracker, self).__init__()
-        self.hidden_size = hidden_size
-        self.Decoder = nn.LSTM(input_size = 4 * hidden_size, hidden_size = hidden_size,
+        self.hidden_size = opt.hidden_size
+        self.Decoder = nn.LSTM(input_size = 4 * opt.hidden_size, hidden_size = opt.hidden_size,
                                     num_layers = 1, batch_first = True, bidirectional = True)
-        self.Dropout = nn.Dropout(p = dropout)
-        self.Hidden2Tag = Linear(d_in = 2 * hidden_size, d_out = NUM_STATES, dropout = 0)
+        self.Dropout = nn.Dropout(p = opt.dropout)
+        self.Hidden2Tag = Linear(d_in = 2 * opt.hidden_size, d_out = NUM_STATES, dropout = 0)
+        self.CpnetMemory = CpnetMemory(opt, query_size = 2 * opt.hidden_size, input_size = 4 * opt.hidden_size)
 
 
-    def forward(self, encoder_out, entity_mask, verb_mask):
+    def forward(self, encoder_out, entity_mask, verb_mask, sentence_mask, cpnet_triples):
         """
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
             entity_mask: size (batch, max_sents, max_tokens)
             verb_mask: size (batch, max_sents, max_tokens)
+            sentence_mask: size(batch, max_sents, max_tokens)
+            cpnet_triples: List, (batch, num_cpnet, seq_len)
         """
         batch_size = encoder_out.size(0)
         max_sents = entity_mask.size(-2)
 
-        decoder_in = self.get_masked_input(encoder_out, entity_mask, verb_mask, batch_size = batch_size)  # (batch, max_sents, 4 * hidden_size)
+        # (batch, max_sents, 4 * hidden_size)
+        decoder_in = self.get_masked_input(encoder_out, entity_mask, verb_mask, batch_size = batch_size)
+        # (batch, max_sents, 4 * hidden_size)
+        decoder_in = self.CpnetMemory(encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples)
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         decoder_out = self.Dropout(decoder_out)
         tag_logits = self.Hidden2Tag(decoder_out)  # (batch, max_sents, num_tags)
@@ -389,6 +395,78 @@ class LocationPredictor(nn.Module):
         return masked_mean
 
 
+class CpnetMemory(nn.Module):
+
+    def __init__(self, opt, query_size: int, input_size: int):
+        super(CpnetMemory, self).__init__()
+        self.cuda = not opt.no_cuda
+        self.CpnetEncoder = FixedSentEncoder(model_class=opt.cpnet_enc_class, model_name=opt.cpnet_enc_name,
+                                             dropout=opt.dropout, cuda=self.cuda)
+        self.query_size = query_size
+        self.value_size = MODEL_HIDDEN[opt.cpnet_enc_name]
+        self.input_size = input_size
+        self.AttnUpdate = GatedAttnUpdate(query_size=self.query_size, value_size=self.value_size,
+                                          input_size=self.input_size, dropout=opt.dropout)
+
+
+    def forward(self, encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples):
+        """
+        Args:
+            encoder_out: size (batch, max_tokens, 2 * hidden_size)
+            decoder_in: (batch, max_sents, 4 * hidden_size) for state tracking,
+                        (batch * max_cands, max_sents, 4 * hidden_size) for location prediciton
+            entity_mask: size(batch, max_sents, max_tokens)
+            sentence_mask: size(batch, max_sents, max_tokens)
+            cpnet_triples: List, (batch, num_cands, seq_len)
+        """
+        batch_size = encoder_out.size(0)
+        # use the embedding of the current sentence as the attention query
+        # (batch, max_sents, 2 * hidden_size)
+        query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
+        attn_mask = self.get_attn_mask(cpnet_triples)
+        if self.cuda:
+            attn_mask = attn_mask.cuda()
+
+        cpnet_rep = self.CpnetEncoder(cpnet_triples)
+        update_in = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask)
+
+        return update_in
+
+
+    def get_masked_mean(self, source, mask, batch_size: int):
+        """
+        Args:
+            source - input tensors, size(batch, tokens, 2 * hidden_size)
+            mask - binary masked vectors, size(batch, sents, tokens)
+        Return:
+            the average of unmasked input tensors, size (batch, sents, 2 * hidden_size)
+        """
+        max_sents = mask.size(-2)
+
+        bool_mask = (mask.unsqueeze(dim = -1) == 0)  # turn binary masks to boolean values
+        masked_source = source.unsqueeze(dim = 1).masked_fill(bool_mask, value = 0)  # for masked tokens, turn its value to 0
+        masked_source = torch.sum(masked_source, dim = -2)  # sum the unmasked token representations
+        assert masked_source.size() == (batch_size, max_sents, 2 * self.hidden_size)
+
+        num_unmasked_tokens = torch.sum(mask, dim = -1, keepdim = True)  # compute the denominator of average op (number of unmasked tokens)
+        masked_mean = torch.div(input = masked_source, other = num_unmasked_tokens)  # average the unmasked vectors
+
+        # division op may cause nan while encoutering 0, so replace nan with 0
+        is_nan = torch.isnan(masked_mean)
+        masked_mean = masked_mean.masked_fill(is_nan, value = 0)
+
+        assert masked_mean.size() == (batch_size, max_sents, 2 * self.hidden_size)
+        return masked_mean
+
+
+    def get_attn_mask(self, cpnet_triples: List):
+        attn_mask = []
+        for instance in cpnet_triples:
+            attn_mask.append(list(map(lambda x: x != '', instance)))
+        return torch.tensor(attn_mask, dtype=torch.int)
+
+
+
 class GatedAttnUpdate(nn.Module):
     """
     Attention + gate update
@@ -410,37 +488,39 @@ class GatedAttnUpdate(nn.Module):
 
     def forward(self, query, values, ori_input, attn_mask):
         """
-        :param query: (batch, query_size)
+        :param query: (batch, max_sents, query_size)
         :param values: (batch, num_cands, value_size)
         :param attn_mask: (batch, num_cands), 0 for pad values
-        :param ori_input: (batch, input_size), input vector to be merged with context vector
+        :param ori_input: (batch, max_sents, input_size), input vector to be merged with context vector
         :return:
         """
-        assert query.size(0) == values.size(0)
-        assert len(query.size()) == 2, len(values.size()) == 3
+        assert query.size(0) == values.size(0), query.size(1) == ori_input.size(1)
+        assert len(query.size()) == len(values.size()) == len(ori_input.size()) == 3
         batch_size = query.size(0)
         num_cands = values.size(1)
+        max_sents = query.size(1)
         assert query.size(-1) == self.query_size
         assert values.size(-1) == self.value_size
         assert ori_input.size(-1) == self.input_size
 
         # attention
-        query = query.unsqueeze(1)  # (batch, 1, query_size)
         attn_vec = self.attn_vec.unsqueeze(0).expand(batch_size, -1, -1)  # (batch, query_size, value_size)
-        S = torch.bmm(torch.bmm(query, attn_vec), values.transpose(1, 2))  # similarity score, (batch, 1, num_cands)
-        S = S.squeeze()
-        S = S.masked_fill(attn_mask == 0, float('-inf'))
-        probs = F.softmax(S, dim=-1)
+        # similarity score, (batch, max_sents, num_cands)
+        S = torch.bmm(torch.bmm(query, attn_vec), values.transpose(1, 2))
+        if attn_mask is not None:
+            attn_mask = attn_mask.squeeze(1)
+            S = S.masked_fill(attn_mask == 0, float('-inf'))
+        probs = F.softmax(S, dim=-1)  # attention weights, (batch, max_sents, num_cands)
         probs = self.Dropout(probs)
-        C = torch.bmm(probs.unsqueeze(1), values).squeeze()  # weighted sum, (batch, value_size)
-        assert C.size() == (batch_size, self.value_size)
+        C = torch.bmm(probs, values).squeeze()  # weighted sum, (batch, max_sents, value_size)
+        assert C.size() == (batch_size, max_sents, self.value_size)
 
         # gate
         concat_vec = torch.cat([ori_input, C], dim=-1)
         gate_vec = F.sigmoid(self.gate_fc(concat_vec))
         cand_input = self.concat_fc(concat_vec)
         final_input = torch.mul(gate_vec, cand_input) + torch.mul(1 - gate_vec, ori_input)
-        assert final_input.size() == (batch_size, self.input_size)
+        assert final_input.size() == (batch_size, max_sents, self.input_size)
 
         return final_input
 
@@ -468,7 +548,7 @@ class FixedSentEncoder(nn.Module):
     def forward(self, input: List[List[str]]):
         """
         Args:
-            input: size(batch, 10), each is a list of untokenized strings.
+            input: size(batch, num_cands), each is a list of untokenized strings.
         """
         batch_size = len(input)
         num_cands = len(input[0])
