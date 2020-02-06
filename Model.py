@@ -432,6 +432,9 @@ class CpnetMemory(nn.Module):
         cpnet_rep = self.CpnetEncoder(cpnet_triples)
         update_in = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask)
 
+        mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
+        update_in = update_in.masked_fill(mask_vec==0, value=0)
+
         return update_in
 
 

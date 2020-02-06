@@ -274,16 +274,19 @@ def evaluate(dev_set, model):
 
             paragraphs = batch['paragraph']
             char_paragraph = batch_to_ids(paragraphs)
+            sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
             loc_mask = batch['loc_mask']
             gold_loc_seq = batch['gold_loc_seq']
             gold_state_seq = batch['gold_state_seq']
+            cpnet_triples = batch['cpnet']
             metadata = batch['metadata']
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
             if not opt.no_cuda:
                 char_paragraph = char_paragraph.cuda()
+                sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
                 loc_mask = loc_mask.cuda()
@@ -293,7 +296,7 @@ def evaluate(dev_set, model):
 
             eval_result = model(char_paragraph = char_paragraph, entity_mask = entity_mask, verb_mask = verb_mask,
                                 loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
-                                num_cands = num_cands)
+                                num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples)
 
             eval_state_loss, eval_loc_loss, eval_state_correct, eval_state_pred, \
                 eval_loc_correct, eval_loc_pred = eval_result
@@ -339,16 +342,19 @@ def test(test_set, model):
 
             paragraphs = batch['paragraph']
             char_paragraph = batch_to_ids(paragraphs)
+            sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
             loc_mask = batch['loc_mask']
             gold_loc_seq = batch['gold_loc_seq']
             gold_state_seq = batch['gold_state_seq']
+            cpnet_triples = batch['cpnet']
             metadata = batch['metadata']
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
             if not opt.no_cuda:
                 char_paragraph = char_paragraph.cuda()
+                sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
                 loc_mask = loc_mask.cuda()
@@ -358,7 +364,7 @@ def test(test_set, model):
 
             test_result = model(char_paragraph=char_paragraph, entity_mask=entity_mask, verb_mask=verb_mask,
                                 loc_mask=loc_mask, gold_loc_seq=gold_loc_seq, gold_state_seq=gold_state_seq,
-                                num_cands=num_cands)
+                                num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples)
 
             pred_state_seq, pred_loc_seq, test_state_correct, test_state_pred,\
                 test_loc_correct, test_loc_pred = test_result
