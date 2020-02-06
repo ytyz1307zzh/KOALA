@@ -20,6 +20,7 @@ from utils import *
 from allennlp.modules.elmo import Elmo
 from torchcrf import CRF
 import argparse
+import pdb
 
 
 class NCETModel(nn.Module):
@@ -516,13 +517,14 @@ class GatedAttnUpdate(nn.Module):
             attn_mask = attn_mask.unsqueeze(1)
             S = S.masked_fill(attn_mask == 0, float('-inf'))
         probs = F.softmax(S, dim=-1)  # attention weights, (batch, max_sents, num_cands)
-        probs = self.Dropout(probs)
+        is_nan = torch.isnan(probs)
+        probs = probs.masked_fill(is_nan, value=0)  # if no valid triple exist, the system will output nan
         C = torch.bmm(probs, values).squeeze()  # weighted sum, (batch, max_sents, value_size)
         assert C.size() == (batch_size, max_sents, self.value_size)
 
         # gate
         concat_vec = torch.cat([ori_input, C], dim=-1)
-        gate_vec = F.sigmoid(self.gate_fc(concat_vec))
+        gate_vec = torch.sigmoid(self.gate_fc(concat_vec))
         cand_input = self.concat_fc(concat_vec)
         final_input = torch.mul(gate_vec, cand_input) + torch.mul(1 - gate_vec, ori_input)
         assert final_input.size() == (batch_size, max_sents, self.input_size)
@@ -577,7 +579,10 @@ class FixedSentEncoder(nn.Module):
             pad_mask = attention_mask[i]
             num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
             token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
-            sent_embed.append(torch.mean(token_embed, dim=0))
+            mean_embed = torch.mean(token_embed, dim=0)
+            is_nan = torch.isnan(mean_embed)
+            mean_embed = mean_embed.masked_fill(is_nan, value=0)
+            sent_embed.append(mean_embed)
         sent_embed = torch.stack(sent_embed, dim=0)
         assert sent_embed.size() == (batch_size * num_cands, self.hidden_size)
         sent_embed = self.Dropout(sent_embed)

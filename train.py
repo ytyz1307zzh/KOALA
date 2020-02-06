@@ -24,7 +24,7 @@ from Dataset import *
 from Model import *
 import datetime as dt
 print(f'[INFO] Import modules time: {time.time() - import_start_time}s')
-torch.set_printoptions(threshold=np.inf)
+torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False)
 
 
 parser = argparse.ArgumentParser()
