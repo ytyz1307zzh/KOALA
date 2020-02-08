@@ -43,7 +43,7 @@ class NCETModel(nn.Module):
         self.CRFLayer = CRF(NUM_STATES, batch_first = True)
 
         # location prediction modules
-        self.LocationPredictor = LocationPredictor(hidden_size = opt.hidden_size, dropout = opt.dropout)
+        self.LocationPredictor = LocationPredictor(opt)
         self.CrossEntropy = nn.CrossEntropyLoss(ignore_index = PAD_LOC, reduction = 'mean')
 
         self.is_test = is_test
@@ -85,7 +85,8 @@ class NCETModel(nn.Module):
 
         # location prediction
         # size (batch, max_cands, max_sents)
-        loc_logits = self.LocationPredictor(encoder_out = token_rep, entity_mask = entity_mask, loc_mask = loc_mask)
+        loc_logits = self.LocationPredictor(encoder_out = token_rep, entity_mask = entity_mask, loc_mask = loc_mask,
+                                            sentence_mask = sentence_mask, cpnet_triples = cpnet_triples)
         loc_logits = loc_logits.transpose(-1, -2)  # size (batch, max_sents, max_cands)
         masked_loc_logits = self.mask_loc_logits(loc_logits = loc_logits, num_cands = num_cands)  # (batch, max_sents, max_cands)
         masked_gold_loc_seq = self.mask_undefined_loc(gold_loc_seq = gold_loc_seq, mask_value = PAD_LOC)  # (batch, max_sents)
@@ -288,17 +289,18 @@ class LocationPredictor(nn.Module):
     """
     Location prediction decoder: sentence-level Bi-LSTM + linear + softmax
     """
-    def __init__(self, hidden_size: int, dropout: float):
+    def __init__(self, opt: argparse.Namespace):
 
         super(LocationPredictor, self).__init__()
-        self.hidden_size = hidden_size
-        self.Decoder = nn.LSTM(input_size = 4 * hidden_size, hidden_size = hidden_size,
+        self.hidden_size = opt.hidden_size
+        self.Decoder = nn.LSTM(input_size = 4 * opt.hidden_size, hidden_size = opt.hidden_size,
                                     num_layers = 1, batch_first = True, bidirectional = True)
-        self.Dropout = nn.Dropout(p = dropout)
-        self.Hidden2Score = Linear(d_in = 2 * hidden_size, d_out = 1, dropout = 0)
+        self.Dropout = nn.Dropout(p = opt.dropout)
+        self.Hidden2Score = Linear(d_in = 2 * opt.hidden_size, d_out = 1, dropout = 0)
+        self.CpnetMemory = CpnetMemory(opt, query_size=2 * opt.hidden_size, input_size=4 * opt.hidden_size)
 
 
-    def forward(self, encoder_out, entity_mask, loc_mask):
+    def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples):
         """
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
@@ -311,6 +313,11 @@ class LocationPredictor(nn.Module):
 
         decoder_in = self.get_masked_input(encoder_out, entity_mask, loc_mask, batch_size = batch_size)
         decoder_in = decoder_in.view(batch_size * max_cands, max_sents, 4 * self.hidden_size)
+        decoder_in = self.CpnetMemory(encoder_out=self.expand_dim(encoder_out, max_cands),
+                                      decoder_in=decoder_in,
+                                      entity_mask=self.expand_dim(entity_mask, max_cands),
+                                      sentence_mask=self.expand_dim(sentence_mask, max_cands),
+                                      cpnet_triples=self.expand_len(cpnet_triples, max_cands))
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         assert decoder_out.size() == (batch_size * max_cands, max_sents, 2 * self.hidden_size)
 
@@ -397,6 +404,32 @@ class LocationPredictor(nn.Module):
         return masked_mean
 
 
+    def expand_dim(self, vec: torch.Tensor, loc_cands: int):
+        """
+        Expand the vector in the batch dimension (dimension 0)
+        """
+        assert len(vec.size()) == 3
+        batch_size = vec.size(0)
+        seq_len = vec.size(1)
+        rep_size = vec.size(2)
+        vec = vec.unsqueeze(1).repeat(1, loc_cands, 1, 1)
+        vec = vec.view(batch_size * loc_cands, seq_len, rep_size)
+        return vec
+
+
+    def expand_len(self, vec: List, loc_cands: int):
+        """
+        The list version of self.expand_dim()
+        """
+        batch_size = len(vec)
+        result = []
+        for i in range(batch_size):
+            for _ in range(loc_cands):
+                result.append(vec[i])
+        assert len(result) == len(vec) * loc_cands
+        return result
+
+
 class CpnetMemory(nn.Module):
 
     def __init__(self, opt, query_size: int, input_size: int):
@@ -412,7 +445,7 @@ class CpnetMemory(nn.Module):
                                           input_size=self.input_size, dropout=opt.dropout)
 
 
-    def forward(self, encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples):
+    def forward(self, encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples: List[List[str]]):
         """
         Args:
             encoder_out: size (batch, max_tokens, 2 * hidden_size)
@@ -420,8 +453,10 @@ class CpnetMemory(nn.Module):
                         (batch * max_cands, max_sents, 4 * hidden_size) for location prediciton
             entity_mask: size(batch, max_sents, max_tokens)
             sentence_mask: size(batch, max_sents, max_tokens)
-            cpnet_triples: List, (batch, num_cands, seq_len)
+            cpnet_triples: List, (batch, num_cands)
         """
+        assert encoder_out.size(0) == decoder_in.size(0) == entity_mask.size(0) == \
+                sentence_mask.size(0) == len(cpnet_triples)
         batch_size = encoder_out.size(0)
         # use the embedding of the current sentence as the attention query
         # (batch, max_sents, 2 * hidden_size)
