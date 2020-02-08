@@ -61,6 +61,8 @@ parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.jso
 parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
 parser.add_argument('-cpnet_enc_class', type=str, default='roberta', help='conceptnet encoder class')
 parser.add_argument('-cpnet_enc_name', type=str, default='roberta-large', help='conceptnet encoder name')
+parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both'], default='both',
+                    help='where to inject ConceptNet commonsense')
 
 # other parameters
 parser.add_argument('-debug', action='store_true', default=False, help="enable debug mode, change data files to debug data")

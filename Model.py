@@ -38,6 +38,16 @@ class NCETModel(nn.Module):
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
 
+        # fixed pretrained language model
+        assert opt.cpnet_enc_name in MODEL_HIDDEN.keys(), 'Wrong model name provided'
+        fixlm_model_class, fixlm_tokenizer_class = MODEL_CLASSES[opt.cpnet_enc_class]
+
+        print(f'[INFO] Loading pretrained {opt.cpnet_enc_name}...')
+        start_time = time.time()
+        self.fixlm_tokenizer = fixlm_tokenizer_class.from_pretrained(opt.cpnet_enc_name)
+        self.fixlm_model = fixlm_model_class.from_pretrained(opt.cpnet_enc_name)
+        print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
+
         # state tracking modules
         self.StateTracker = StateTracker(opt)
         self.CRFLayer = CRF(NUM_STATES, batch_first = True)
@@ -73,7 +83,8 @@ class NCETModel(nn.Module):
         # state cheng prediction
         # size (batch, max_sents, NUM_STATES)
         tag_logits = self.StateTracker(encoder_out = token_rep, entity_mask = entity_mask, verb_mask = verb_mask,
-                                       sentence_mask = sentence_mask, cpnet_triples = cpnet_triples)
+                                       sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
+                                       fixlm_tokenizer = self.fixlm_tokenizer, fixlm_encoder = self.fixlm_model)
         tag_mask = (gold_state_seq != PAD_STATE) # mask the padded part so they won't count in loss
         log_likelihood = self.CRFLayer(emissions = tag_logits, tags = gold_state_seq.long(), mask = tag_mask, reduction = 'token_mean')
 
@@ -86,7 +97,8 @@ class NCETModel(nn.Module):
         # location prediction
         # size (batch, max_cands, max_sents)
         loc_logits = self.LocationPredictor(encoder_out = token_rep, entity_mask = entity_mask, loc_mask = loc_mask,
-                                            sentence_mask = sentence_mask, cpnet_triples = cpnet_triples)
+                                            sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
+                                            fixlm_tokenizer = self.fixlm_tokenizer, fixlm_encoder = self.fixlm_model)
         loc_logits = loc_logits.transpose(-1, -2)  # size (batch, max_sents, max_cands)
         masked_loc_logits = self.mask_loc_logits(loc_logits = loc_logits, num_cands = num_cands)  # (batch, max_sents, max_cands)
         masked_gold_loc_seq = self.mask_undefined_loc(gold_loc_seq = gold_loc_seq, mask_value = PAD_LOC)  # (batch, max_sents)
@@ -211,9 +223,11 @@ class StateTracker(nn.Module):
         self.Dropout = nn.Dropout(p = opt.dropout)
         self.Hidden2Tag = Linear(d_in = 2 * opt.hidden_size, d_out = NUM_STATES, dropout = 0)
         self.CpnetMemory = CpnetMemory(opt, query_size = 2 * opt.hidden_size, input_size = 4 * opt.hidden_size)
+        self.cpnet_inject = opt.cpnet_inject
 
 
-    def forward(self, encoder_out, entity_mask, verb_mask, sentence_mask, cpnet_triples):
+    def forward(self, encoder_out, entity_mask, verb_mask, sentence_mask, cpnet_triples,
+                fixlm_tokenizer, fixlm_encoder):
         """
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
@@ -228,7 +242,9 @@ class StateTracker(nn.Module):
         # (batch, max_sents, 4 * hidden_size)
         decoder_in = self.get_masked_input(encoder_out, entity_mask, verb_mask, batch_size = batch_size)
         # (batch, max_sents, 4 * hidden_size)
-        decoder_in = self.CpnetMemory(encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples)
+        if self.cpnet_inject in ['state', 'both']:
+            decoder_in = self.CpnetMemory(encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples,
+                                          fixlm_tokenizer, fixlm_encoder)
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         decoder_out = self.Dropout(decoder_out)
         tag_logits = self.Hidden2Tag(decoder_out)  # (batch, max_sents, num_tags)
@@ -298,9 +314,11 @@ class LocationPredictor(nn.Module):
         self.Dropout = nn.Dropout(p = opt.dropout)
         self.Hidden2Score = Linear(d_in = 2 * opt.hidden_size, d_out = 1, dropout = 0)
         self.CpnetMemory = CpnetMemory(opt, query_size=2 * opt.hidden_size, input_size=4 * opt.hidden_size)
+        self.cpnet_inject = opt.cpnet_inject
 
 
-    def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples):
+    def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples,
+                fixlm_tokenizer, fixlm_encoder):
         """
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
@@ -313,11 +331,15 @@ class LocationPredictor(nn.Module):
 
         decoder_in = self.get_masked_input(encoder_out, entity_mask, loc_mask, batch_size = batch_size)
         decoder_in = decoder_in.view(batch_size * max_cands, max_sents, 4 * self.hidden_size)
-        decoder_in = self.CpnetMemory(encoder_out=self.expand_dim(encoder_out, max_cands),
-                                      decoder_in=decoder_in,
-                                      entity_mask=self.expand_dim(entity_mask, max_cands),
-                                      sentence_mask=self.expand_dim(sentence_mask, max_cands),
-                                      cpnet_triples=self.expand_len(cpnet_triples, max_cands))
+        if self.cpnet_inject in ['location', 'both']:
+            decoder_in = self.CpnetMemory(encoder_out=self.expand_dim(encoder_out, max_cands),
+                                          decoder_in=decoder_in,
+                                          entity_mask=self.expand_dim(entity_mask, max_cands),
+                                          sentence_mask=self.expand_dim(sentence_mask, max_cands),
+                                          cpnet_triples=self.expand_len(cpnet_triples, max_cands),
+                                          fixlm_tokenizer = fixlm_tokenizer,
+                                          fixlm_encoder = fixlm_encoder,
+                                          loc_mask = loc_mask.view(batch_size*max_cands, max_sents, -1))
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         assert decoder_out.size() == (batch_size * max_cands, max_sents, 2 * self.hidden_size)
 
@@ -436,8 +458,7 @@ class CpnetMemory(nn.Module):
         super(CpnetMemory, self).__init__()
         self.cuda = not opt.no_cuda
         self.hidden_size = opt.hidden_size
-        self.CpnetEncoder = FixedSentEncoder(model_class=opt.cpnet_enc_class, model_name=opt.cpnet_enc_name,
-                                             dropout=opt.dropout, cuda=self.cuda)
+        self.CpnetEncoder = FixedSentEncoder(opt)
         self.query_size = query_size
         self.value_size = MODEL_HIDDEN[opt.cpnet_enc_name]
         self.input_size = input_size
@@ -445,7 +466,8 @@ class CpnetMemory(nn.Module):
                                           input_size=self.input_size, dropout=opt.dropout)
 
 
-    def forward(self, encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples: List[List[str]]):
+    def forward(self, encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples: List[List[str]],
+                fixlm_tokenizer, fixlm_encoder, loc_mask = None):
         """
         Args:
             encoder_out: size (batch, max_tokens, 2 * hidden_size)
@@ -465,10 +487,12 @@ class CpnetMemory(nn.Module):
         if self.cuda:
             attn_mask = attn_mask.cuda()
 
-        cpnet_rep = self.CpnetEncoder(cpnet_triples)
+        cpnet_rep = self.CpnetEncoder(cpnet_triples, fixlm_tokenizer, fixlm_encoder)
         update_in = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask)
 
         mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
+        if loc_mask is not None:
+            mask_vec += torch.sum(loc_mask, dim=-1, keepdim=True)
         update_in = update_in.masked_fill(mask_vec==0, value=0)
 
         return update_in
@@ -571,23 +595,15 @@ class FixedSentEncoder(nn.Module):
     """
     A encoder that acquires sentence embedding from a fixed pretrained language model
     """
-    def __init__(self, model_class: str, model_name: str, dropout: float, cuda: bool):
+    def __init__(self, opt):
         super(FixedSentEncoder, self).__init__()
-        assert model_name in MODEL_HIDDEN.keys(), 'Wrong model name provided'
-        model_class, tokenizer_class = MODEL_CLASSES[model_class]
-        self.hidden_size = MODEL_HIDDEN[model_name]
+        self.hidden_size = MODEL_HIDDEN[opt.cpnet_enc_name]
 
-        print(f'[INFO] Loading pretrained {model_name}...')
-        start_time = time.time()
-        self.tokenizer = tokenizer_class.from_pretrained(model_name)
-        self.encoder = model_class.from_pretrained(model_name)
-        print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
-
-        self.cuda = cuda
-        self.Dropout = nn.Dropout(p=dropout)
+        self.cuda = not opt.no_cuda
+        self.Dropout = nn.Dropout(p=opt.dropout)
 
 
-    def forward(self, input: List[List[str]]):
+    def forward(self, input: List[List[str]], tokenizer, encoder):
         """
         Args:
             input: size(batch, num_cands), each is a list of untokenized strings.
@@ -595,15 +611,15 @@ class FixedSentEncoder(nn.Module):
         batch_size = len(input)
         num_cands = len(input[0])
         all_sents = itertools.chain.from_iterable(input)  # batch * num_cands
-        input_ids = list(map(lambda s: self.tokenizer.encode(s, add_special_tokens=True), all_sents))
-        input_ids, attention_mask, max_len = self.pad_to_longest(batch=input_ids, pad_id=self.tokenizer.pad_token_id)
+        input_ids = list(map(lambda s: tokenizer.encode(s, add_special_tokens=True), all_sents))
+        input_ids, attention_mask, max_len = self.pad_to_longest(batch=input_ids, pad_id=tokenizer.pad_token_id)
 
         if self.cuda:
             input_ids = input_ids.cuda()
             attention_mask = attention_mask.cuda()
 
         with torch.no_grad():
-            outputs = self.encoder(input_ids, attention_mask=attention_mask)
+            outputs = encoder(input_ids, attention_mask=attention_mask)
 
         last_hidden = outputs[0]  # (batch*num_cands, seq_len, hidden_size)
         assert last_hidden.size() == (batch_size * num_cands, max_len, self.hidden_size)
