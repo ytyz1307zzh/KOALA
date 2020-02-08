@@ -598,6 +598,7 @@ class FixedSentEncoder(nn.Module):
     def __init__(self, opt):
         super(FixedSentEncoder, self).__init__()
         self.hidden_size = MODEL_HIDDEN[opt.cpnet_enc_name]
+        self.lm_batch_size = opt.batch_size
 
         self.cuda = not opt.no_cuda
         self.Dropout = nn.Dropout(p=opt.dropout)
@@ -612,28 +613,36 @@ class FixedSentEncoder(nn.Module):
         num_cands = len(input[0])
         all_sents = itertools.chain.from_iterable(input)  # batch * num_cands
         input_ids = list(map(lambda s: tokenizer.encode(s, add_special_tokens=True), all_sents))
-        input_ids, attention_mask, max_len = self.pad_to_longest(batch=input_ids, pad_id=tokenizer.pad_token_id)
-
-        if self.cuda:
-            input_ids = input_ids.cuda()
-            attention_mask = attention_mask.cuda()
-
-        with torch.no_grad():
-            outputs = encoder(input_ids, attention_mask=attention_mask)
-
-        last_hidden = outputs[0]  # (batch*num_cands, seq_len, hidden_size)
-        assert last_hidden.size() == (batch_size * num_cands, max_len, self.hidden_size)
-
+        input_batches = [input_ids[batch_idx * self.lm_batch_size: (batch_idx + 1) * self.lm_batch_size]
+                         for batch_idx in range(len(input_ids) // self.lm_batch_size + 1)]
         sent_embed = []
-        for i in range(last_hidden.size(0)):
-            embedding = last_hidden[i]  # (max_length, hidden_size)
-            pad_mask = attention_mask[i]
-            num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
-            token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
-            mean_embed = torch.mean(token_embed, dim=0)
-            is_nan = torch.isnan(mean_embed)
-            mean_embed = mean_embed.masked_fill(is_nan, value=0)
-            sent_embed.append(mean_embed)
+
+        for batch_input_ids in input_batches:
+            if not batch_input_ids:
+                continue
+
+            batch_input_ids, attention_mask, max_len = self.pad_to_longest(batch=batch_input_ids,
+                                                                           pad_id=tokenizer.pad_token_id)
+            if self.cuda:
+                batch_input_ids = batch_input_ids.cuda()
+                attention_mask = attention_mask.cuda()
+
+            with torch.no_grad():
+                outputs = encoder(batch_input_ids, attention_mask=attention_mask)
+
+            last_hidden = outputs[0]  # (batch*num_cands, seq_len, hidden_size)
+            assert last_hidden.size() == (self.lm_batch_size, max_len, self.hidden_size)
+
+            for i in range(last_hidden.size(0)):
+                embedding = last_hidden[i]  # (max_length, hidden_size)
+                pad_mask = attention_mask[i]
+                num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
+                token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
+                mean_embed = torch.mean(token_embed, dim=0)
+                is_nan = torch.isnan(mean_embed)
+                mean_embed = mean_embed.masked_fill(is_nan, value=0)
+                sent_embed.append(mean_embed)
+
         sent_embed = torch.stack(sent_embed, dim=0)
         assert sent_embed.size() == (batch_size * num_cands, self.hidden_size)
         sent_embed = self.Dropout(sent_embed)
