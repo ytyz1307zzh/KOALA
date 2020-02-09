@@ -41,7 +41,7 @@ parser.add_argument('-loc_loss', type=float, default=0.5, help="hyper-parameter 
 # training parameters
 parser.add_argument('-mode', type=str, choices=['train', 'test'], default='train', help="train or test")
 parser.add_argument('-ckpt_dir', type=str, default=None, help="checkpoint directory")
-parser.add_argument('-save_mode', type=str, choices=['best', 'all', 'none'], default='best',
+parser.add_argument('-save_mode', type=str, choices=['best', 'all', 'none', 'last'], default='best',
                     help="best (default): save checkpoints when reaching new best score; all: save all checkpoints; none: don't save")
 parser.add_argument('-epoch', type=int, default=100, help="number of epochs, use -1 to rely on early stopping only")
 parser.add_argument('-impatience', type=int, default=20, help='number of evaluation rounds for early stopping, use -1 to disable early stopping')
@@ -69,6 +69,9 @@ parser.add_argument('-debug', action='store_true', default=False, help="enable d
 parser.add_argument('-no_cuda', action='store_true', default=False, help="if true, will only use cpu")
 
 opt = parser.parse_args()
+
+if opt.ckpt_dir and not os.path.exists(opt.ckpt_dir):
+    os.mkdir(opt.ckpt_dir)
 if opt.ckpt_dir:
     log_file = open(os.path.join(opt.ckpt_dir, 'train.log'), 'w', encoding='utf-8')
 
@@ -96,9 +99,6 @@ def save_model(path: str, model: nn.Module):
     if not opt.ckpt_dir:
         print("[ERROR] Intended to store checkpoint but no checkpoint directory is specified.")
         raise RuntimeError("Did not specify -ckpt_dir option")
-
-    if not os.path.exists(opt.ckpt_dir):
-        os.mkdir(opt.ckpt_dir)
 
     model_state_dict = model.state_dict()
     torch.save(model_state_dict, path)
@@ -240,6 +240,8 @@ def train():
                         save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
                     if impatience >= opt.impatience:
                         output('Early Stopping!')
+                        if opt.save_mode == 'last':
+                            save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
                         quit()
 
                 report_state_loss, report_loc_loss = 0, 0
@@ -248,6 +250,9 @@ def train():
                 start_time = time.time()
 
         epoch_i += 1
+
+    if opt.save_mode == 'last':
+        save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
 
 
         # summary(model, char_paragraph, entity_mask, verb_mask, loc_mask)
