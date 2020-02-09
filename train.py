@@ -67,23 +67,15 @@ parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both'], defa
 # other parameters
 parser.add_argument('-debug', action='store_true', default=False, help="enable debug mode, change data files to debug data")
 parser.add_argument('-no_cuda', action='store_true', default=False, help="if true, will only use cpu")
-parser.add_argument('-log_dir', type=str, default=None, help="the log directory to store training logs")
-parser.add_argument('-log_file', type=str, default=None, help="the log file to store training logs")
 
 opt = parser.parse_args()
-
-if opt.log_dir and opt.log_file is None:
-    current_time = dt.datetime.now().strftime("%m-%d.%H-%M-%S")
-    log_path = os.path.join(opt.log_dir, current_time + '.log')
-    log_file = open(log_path, 'w', encoding='utf-8')
-
-if opt.log_file:
-    log_file = open(opt.log_file, 'w', encoding='utf-8')
+if opt.ckpt_dir:
+    log_file = open(os.path.join(opt.ckpt_dir, 'train.log'), 'w', encoding='utf-8')
 
 
 def output(text):
     print(text)
-    if opt.log_dir:
+    if opt.ckpt_dir:
         print(text, file = log_file)
 
 
