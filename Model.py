@@ -46,6 +46,8 @@ class NCETModel(nn.Module):
         start_time = time.time()
         self.fixlm_tokenizer = fixlm_tokenizer_class.from_pretrained(opt.cpnet_enc_name)
         self.fixlm_model = fixlm_model_class.from_pretrained(opt.cpnet_enc_name)
+        for param in self.fixlm_model.parameters():
+            param.requires_grad = False
         print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
 
         # state tracking modules
@@ -154,6 +156,32 @@ class NCETModel(nn.Module):
         masked_gold_loc_seq = gold_loc_seq.masked_fill(mask = negative_labels, value = mask_value)
         return masked_gold_loc_seq
 
+
+    @staticmethod
+    def expand_dim_3d(vec: torch.Tensor, loc_cands: int):
+        """
+        Expand a 3-dim vector in the batch dimension (dimension 0)
+        """
+        assert len(vec.size()) == 3
+        batch_size = vec.size(0)
+        seq_len = vec.size(1)
+        rep_size = vec.size(2)
+        vec = vec.unsqueeze(1).repeat(1, loc_cands, 1, 1)
+        vec = vec.view(batch_size * loc_cands, seq_len, rep_size)
+        return vec
+
+    @staticmethod
+    def expand_dim_2d(vec: torch.Tensor, loc_cands: int):
+        """
+        Expand a 2-dim vector in the batch dimension (dimension 0)
+        """
+        assert len(vec.size()) == 2
+        batch_size = vec.size(0)
+        seq_len = vec.size(1)
+        vec = vec.unsqueeze(1).repeat(1, loc_cands, 1)
+        vec = vec.view(batch_size * loc_cands, seq_len)
+        return vec
+
     
 class NCETEmbedding(nn.Module):
 
@@ -234,7 +262,7 @@ class StateTracker(nn.Module):
             entity_mask: size (batch, max_sents, max_tokens)
             verb_mask: size (batch, max_sents, max_tokens)
             sentence_mask: size(batch, max_sents, max_tokens)
-            cpnet_triples: List, (batch, num_cpnet, seq_len)
+            cpnet_triples: List, (batch, num_cpnet)
         """
         batch_size = encoder_out.size(0)
         max_sents = entity_mask.size(-2)
@@ -323,6 +351,8 @@ class LocationPredictor(nn.Module):
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
             entity_mask: size (batch, max_sents, max_tokens)
+            sentence_mask: size(batch, max_sents, max_tokens)
+            cpnet_triples: List, (batch, num_cpnet)
             loc_mask: size (batch, max_cands, max_sents, max_tokens)
         """
         batch_size = encoder_out.size(0)
@@ -332,11 +362,11 @@ class LocationPredictor(nn.Module):
         decoder_in = self.get_masked_input(encoder_out, entity_mask, loc_mask, batch_size = batch_size)
         decoder_in = decoder_in.view(batch_size * max_cands, max_sents, 4 * self.hidden_size)
         if self.cpnet_inject in ['location', 'both']:
-            decoder_in = self.CpnetMemory(encoder_out=self.expand_dim(encoder_out, max_cands),
+            decoder_in = self.CpnetMemory(encoder_out=NCETModel.expand_dim_3d(encoder_out, max_cands),
                                           decoder_in=decoder_in,
-                                          entity_mask=self.expand_dim(entity_mask, max_cands),
-                                          sentence_mask=self.expand_dim(sentence_mask, max_cands),
-                                          cpnet_triples=self.expand_len(cpnet_triples, max_cands),
+                                          entity_mask=NCETModel.expand_dim_3d(entity_mask, max_cands),
+                                          sentence_mask=NCETModel.expand_dim_3d(sentence_mask, max_cands),
+                                          cpnet_triples=cpnet_triples,
                                           fixlm_tokenizer = fixlm_tokenizer,
                                           fixlm_encoder = fixlm_encoder,
                                           loc_mask = loc_mask.view(batch_size*max_cands, max_sents, -1))
@@ -426,32 +456,6 @@ class LocationPredictor(nn.Module):
         return masked_mean
 
 
-    def expand_dim(self, vec: torch.Tensor, loc_cands: int):
-        """
-        Expand the vector in the batch dimension (dimension 0)
-        """
-        assert len(vec.size()) == 3
-        batch_size = vec.size(0)
-        seq_len = vec.size(1)
-        rep_size = vec.size(2)
-        vec = vec.unsqueeze(1).repeat(1, loc_cands, 1, 1)
-        vec = vec.view(batch_size * loc_cands, seq_len, rep_size)
-        return vec
-
-
-    def expand_len(self, vec: List, loc_cands: int):
-        """
-        The list version of self.expand_dim()
-        """
-        batch_size = len(vec)
-        result = []
-        for i in range(batch_size):
-            for _ in range(loc_cands):
-                result.append(vec[i])
-        assert len(result) == len(vec) * loc_cands
-        return result
-
-
 class CpnetMemory(nn.Module):
 
     def __init__(self, opt, query_size: int, input_size: int):
@@ -478,7 +482,7 @@ class CpnetMemory(nn.Module):
             cpnet_triples: List, (batch, num_cands)
         """
         assert encoder_out.size(0) == decoder_in.size(0) == entity_mask.size(0) == \
-                sentence_mask.size(0) == len(cpnet_triples)
+                sentence_mask.size(0)
         batch_size = encoder_out.size(0)
         # use the embedding of the current sentence as the attention query
         # (batch, max_sents, 2 * hidden_size)
@@ -488,6 +492,11 @@ class CpnetMemory(nn.Module):
             attn_mask = attn_mask.cuda()
 
         cpnet_rep = self.CpnetEncoder(cpnet_triples, fixlm_tokenizer, fixlm_encoder)
+        if loc_mask is not None:
+            assert cpnet_rep.size(0) != batch_size, batch_size % cpnet_rep.size(0) == 0
+            max_cands = batch_size // cpnet_rep.size(0)
+            cpnet_rep = NCETModel.expand_dim_3d(cpnet_rep, loc_cands=max_cands)
+            attn_mask = NCETModel.expand_dim_2d(attn_mask, loc_cands=max_cands)
         update_in = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask)
 
         mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
@@ -618,6 +627,7 @@ class FixedSentEncoder(nn.Module):
         sent_embed = []
 
         for batch_input_ids in input_batches:
+            mini_batch_size = len(batch_input_ids)
             if not batch_input_ids:
                 continue
 
@@ -631,7 +641,7 @@ class FixedSentEncoder(nn.Module):
                 outputs = encoder(batch_input_ids, attention_mask=attention_mask)
 
             last_hidden = outputs[0]  # (batch*num_cands, seq_len, hidden_size)
-            assert last_hidden.size() == (self.lm_batch_size, max_len, self.hidden_size)
+            assert last_hidden.size() == (mini_batch_size, max_len, self.hidden_size)
 
             for i in range(last_hidden.size(0)):
                 embedding = last_hidden[i]  # (max_length, hidden_size)
