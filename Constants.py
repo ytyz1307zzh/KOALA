@@ -1,4 +1,5 @@
-from transformers import BertModel, BertTokenizer, RobertaModel, RobertaTokenizer
+from transformers import BertModel, BertTokenizer, BertConfig,\
+    RobertaModel, RobertaTokenizer, RobertaConfig
 
 # map state labels to indices
 state2idx = {'O_C': 0, 'O_D': 1, 'E': 2, 'M': 3, 'C': 4, 'D': 5}
@@ -13,8 +14,8 @@ PAD_STATE = -1
 NUM_STATES = len(state2idx)
 
 MODEL_CLASSES = {
-    'bert': (BertModel, BertTokenizer),
-    'roberta': (RobertaModel, RobertaTokenizer),
+    'bert': (BertModel, BertTokenizer, BertConfig),
+    'roberta': (RobertaModel, RobertaTokenizer, RobertaConfig),
 }
 
 MODEL_HIDDEN = {'bert-base-uncased': 768,

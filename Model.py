@@ -40,14 +40,19 @@ class NCETModel(nn.Module):
 
         # fixed pretrained language model
         assert opt.cpnet_enc_name in MODEL_HIDDEN.keys(), 'Wrong model name provided'
-        fixlm_model_class, fixlm_tokenizer_class = MODEL_CLASSES[opt.cpnet_enc_class]
+        cpnet_model_class, cpnet_tokenizer_class, cpnet_config_class = MODEL_CLASSES[opt.cpnet_enc_class]
 
         print(f'[INFO] Loading pretrained {opt.cpnet_enc_name}...')
         start_time = time.time()
-        self.fixlm_tokenizer = fixlm_tokenizer_class.from_pretrained(opt.cpnet_enc_name)
-        self.fixlm_model = fixlm_model_class.from_pretrained(opt.cpnet_enc_name)
-        for param in self.fixlm_model.parameters():
-            param.requires_grad = False
+        self.cpnet_config = cpnet_config_class.from_pretrained(opt.cpnet_enc_name)
+        self.cpnet_tokenizer = cpnet_tokenizer_class.from_pretrained(opt.cpnet_enc_name)
+        if is_test:
+            self.cpnet_model = cpnet_model_class(config=self.cpnet_config)  # use saved parameters
+        else:
+            self.cpnet_model = cpnet_model_class.from_pretrained(opt.cpnet_enc_name)
+        if not opt.cpnet_finetune:  # if you choose to fix the params
+            for param in self.cpnet_model.parameters():
+                param.requires_grad = False
         print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
 
         # state tracking modules
@@ -86,7 +91,7 @@ class NCETModel(nn.Module):
         # size (batch, max_sents, NUM_STATES)
         tag_logits = self.StateTracker(encoder_out = token_rep, entity_mask = entity_mask, verb_mask = verb_mask,
                                        sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
-                                       fixlm_tokenizer = self.fixlm_tokenizer, fixlm_encoder = self.fixlm_model)
+                                       cpnet_tokenizer = self.cpnet_tokenizer, cpnet_encoder = self.cpnet_model)
         tag_mask = (gold_state_seq != PAD_STATE) # mask the padded part so they won't count in loss
         log_likelihood = self.CRFLayer(emissions = tag_logits, tags = gold_state_seq.long(), mask = tag_mask, reduction = 'token_mean')
 
@@ -100,7 +105,7 @@ class NCETModel(nn.Module):
         # size (batch, max_cands, max_sents)
         loc_logits = self.LocationPredictor(encoder_out = token_rep, entity_mask = entity_mask, loc_mask = loc_mask,
                                             sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
-                                            fixlm_tokenizer = self.fixlm_tokenizer, fixlm_encoder = self.fixlm_model)
+                                            cpnet_tokenizer = self.cpnet_tokenizer, cpnet_encoder = self.cpnet_model)
         loc_logits = loc_logits.transpose(-1, -2)  # size (batch, max_sents, max_cands)
         masked_loc_logits = self.mask_loc_logits(loc_logits = loc_logits, num_cands = num_cands)  # (batch, max_sents, max_cands)
         masked_gold_loc_seq = self.mask_undefined_loc(gold_loc_seq = gold_loc_seq, mask_value = PAD_LOC)  # (batch, max_sents)
@@ -255,7 +260,7 @@ class StateTracker(nn.Module):
 
 
     def forward(self, encoder_out, entity_mask, verb_mask, sentence_mask, cpnet_triples,
-                fixlm_tokenizer, fixlm_encoder):
+                cpnet_tokenizer, cpnet_encoder):
         """
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
@@ -272,7 +277,7 @@ class StateTracker(nn.Module):
         # (batch, max_sents, 4 * hidden_size)
         if self.cpnet_inject in ['state', 'both']:
             decoder_in = self.CpnetMemory(encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples,
-                                          fixlm_tokenizer, fixlm_encoder)
+                                          cpnet_tokenizer, cpnet_encoder)
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         decoder_out = self.Dropout(decoder_out)
         tag_logits = self.Hidden2Tag(decoder_out)  # (batch, max_sents, num_tags)
@@ -346,7 +351,7 @@ class LocationPredictor(nn.Module):
 
 
     def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples,
-                fixlm_tokenizer, fixlm_encoder):
+                cpnet_tokenizer, cpnet_encoder):
         """
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
@@ -367,8 +372,8 @@ class LocationPredictor(nn.Module):
                                           entity_mask=NCETModel.expand_dim_3d(entity_mask, max_cands),
                                           sentence_mask=NCETModel.expand_dim_3d(sentence_mask, max_cands),
                                           cpnet_triples=cpnet_triples,
-                                          fixlm_tokenizer = fixlm_tokenizer,
-                                          fixlm_encoder = fixlm_encoder,
+                                          cpnet_tokenizer = cpnet_tokenizer,
+                                          cpnet_encoder = cpnet_encoder,
                                           loc_mask = loc_mask.view(batch_size*max_cands, max_sents, -1))
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         assert decoder_out.size() == (batch_size * max_cands, max_sents, 2 * self.hidden_size)
@@ -462,7 +467,11 @@ class CpnetMemory(nn.Module):
         super(CpnetMemory, self).__init__()
         self.cuda = not opt.no_cuda
         self.hidden_size = opt.hidden_size
-        self.CpnetEncoder = FixedSentEncoder(opt)
+        # whether to fine-tune the language model or not
+        if opt.cpnet_finetune:
+            self.CpnetEncoder = FineTuneSentEncoder(opt)
+        else:
+            self.CpnetEncoder = FixedSentEncoder(opt)
         self.query_size = query_size
         self.value_size = MODEL_HIDDEN[opt.cpnet_enc_name]
         self.input_size = input_size
@@ -471,7 +480,7 @@ class CpnetMemory(nn.Module):
 
 
     def forward(self, encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples: List[List[str]],
-                fixlm_tokenizer, fixlm_encoder, loc_mask = None):
+                cpnet_tokenizer, cpnet_encoder, loc_mask = None):
         """
         Args:
             encoder_out: size (batch, max_tokens, 2 * hidden_size)
@@ -491,7 +500,7 @@ class CpnetMemory(nn.Module):
         if self.cuda:
             attn_mask = attn_mask.cuda()
 
-        cpnet_rep = self.CpnetEncoder(cpnet_triples, fixlm_tokenizer, fixlm_encoder)
+        cpnet_rep = self.CpnetEncoder(cpnet_triples, cpnet_tokenizer, cpnet_encoder)
         if loc_mask is not None:
             assert cpnet_rep.size(0) != batch_size, batch_size % cpnet_rep.size(0) == 0
             max_cands = batch_size // cpnet_rep.size(0)
@@ -600,6 +609,57 @@ class GatedAttnUpdate(nn.Module):
         return final_input
 
 
+class FineTuneSentEncoder(nn.Module):
+    """
+    A encoder that acquires sentence embedding from a pretrained language model (to be fine-tuned)
+    """
+    def __init__(self, opt):
+        super(FineTuneSentEncoder, self).__init__()
+        self.hidden_size = MODEL_HIDDEN[opt.cpnet_enc_name]
+        self.lm_batch_size = opt.batch_size
+
+        self.cuda = not opt.no_cuda
+        self.Dropout = nn.Dropout(p=opt.dropout)
+
+
+    def forward(self, input: List[List[str]], tokenizer, encoder):
+        """
+        Args:
+            input: size(batch, num_cands), each is a list of untokenized strings.
+        """
+        batch_size = len(input)
+        num_cands = len(input[0])
+        all_sents = itertools.chain.from_iterable(input)  # batch * num_cands
+        input_ids = list(map(lambda s: tokenizer.encode(s, add_special_tokens=True), all_sents))
+        input_batches = [input_ids[batch_idx * self.lm_batch_size: (batch_idx + 1) * self.lm_batch_size]
+                         for batch_idx in range(len(input_ids) // self.lm_batch_size + 1)]
+        sent_embed = []
+
+        for batch_input_ids in input_batches:
+            mini_batch_size = len(batch_input_ids)
+            if not batch_input_ids:
+                continue
+
+            batch_input_ids, attention_mask, max_len = \
+                FixedSentEncoder.pad_to_longest(batch=batch_input_ids,
+                                                pad_id=tokenizer.pad_token_id)
+            if self.cuda:
+                batch_input_ids = batch_input_ids.cuda()
+                attention_mask = attention_mask.cuda()
+
+            outputs = encoder(batch_input_ids, attention_mask=attention_mask)
+
+            cls_hidden = outputs[1]  # (batch, hidden_size)
+            assert cls_hidden.size() == (mini_batch_size, self.hidden_size)
+            sent_embed.append(cls_hidden)
+
+        sent_embed = torch.cat(sent_embed, dim=0)
+        assert sent_embed.size() == (batch_size * num_cands, self.hidden_size)
+        sent_embed = self.Dropout(sent_embed)
+
+        return sent_embed.view(batch_size, num_cands, self.hidden_size)
+
+
 class FixedSentEncoder(nn.Module):
     """
     A encoder that acquires sentence embedding from a fixed pretrained language model
@@ -631,8 +691,9 @@ class FixedSentEncoder(nn.Module):
             if not batch_input_ids:
                 continue
 
-            batch_input_ids, attention_mask, max_len = self.pad_to_longest(batch=batch_input_ids,
-                                                                           pad_id=tokenizer.pad_token_id)
+            batch_input_ids, attention_mask, max_len = \
+                FixedSentEncoder.pad_to_longest(batch=batch_input_ids,
+                                                pad_id=tokenizer.pad_token_id)
             if self.cuda:
                 batch_input_ids = batch_input_ids.cuda()
                 attention_mask = attention_mask.cuda()
@@ -640,7 +701,7 @@ class FixedSentEncoder(nn.Module):
             with torch.no_grad():
                 outputs = encoder(batch_input_ids, attention_mask=attention_mask)
 
-            last_hidden = outputs[0]  # (batch*num_cands, seq_len, hidden_size)
+            last_hidden = outputs[0]  # (batch, seq_len, hidden_size)
             assert last_hidden.size() == (mini_batch_size, max_len, self.hidden_size)
 
             for i in range(last_hidden.size(0)):
@@ -660,7 +721,8 @@ class FixedSentEncoder(nn.Module):
         return sent_embed.view(batch_size, num_cands, self.hidden_size)
 
 
-    def pad_to_longest(self, batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTensor):
+    @staticmethod
+    def pad_to_longest(batch: List, pad_id: int) -> (torch.LongTensor, torch.FloatTensor):
         """
         Pad the sentences to the longest length in a batch
         """
