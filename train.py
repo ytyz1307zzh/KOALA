@@ -37,6 +37,7 @@ parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
 parser.add_argument('-elmo_dropout', type=float, default=0.5, help="dropout rate of elmo embedding")
 parser.add_argument('-loc_loss', type=float, default=0.5, help="hyper-parameter to weight location loss and state_loss")
+parser.add_argument("-max_grad_norm", default=1.0, type=float, help="Max gradient norm")
 
 # training parameters
 parser.add_argument('-mode', type=str, choices=['train', 'test'], default='train', help="train or test")
@@ -192,6 +193,7 @@ def train():
 
             train_loss = train_state_loss + opt.loc_loss * train_loc_loss
             train_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), opt.max_grad_norm)
             optimizer.step()
 
             report_state_loss += train_state_loss.item() * train_state_pred

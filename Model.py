@@ -55,6 +55,12 @@ class NCETModel(nn.Module):
                 param.requires_grad = False
         print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
 
+        # whether to fine-tune the language model or not
+        if opt.cpnet_finetune:
+            self.CpnetEncoder = FineTuneSentEncoder(opt)
+        else:
+            self.CpnetEncoder = FixedSentEncoder(opt)
+
         # state tracking modules
         self.StateTracker = StateTracker(opt)
         self.CRFLayer = CRF(NUM_STATES, batch_first = True)
@@ -87,11 +93,13 @@ class NCETModel(nn.Module):
         token_rep = self.Dropout(token_rep)
         assert token_rep.size() == (batch_size, max_tokens, 2 * self.hidden_size)
 
-        # state cheng prediction
+        cpnet_rep = self.CpnetEncoder(cpnet_triples, self.cpnet_tokenizer, self.cpnet_encoder)
+
+        # state change prediction
         # size (batch, max_sents, NUM_STATES)
         tag_logits = self.StateTracker(encoder_out = token_rep, entity_mask = entity_mask, verb_mask = verb_mask,
                                        sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
-                                       cpnet_tokenizer = self.cpnet_tokenizer, cpnet_encoder = self.cpnet_model)
+                                       cpnet_rep = cpnet_rep)
         tag_mask = (gold_state_seq != PAD_STATE) # mask the padded part so they won't count in loss
         log_likelihood = self.CRFLayer(emissions = tag_logits, tags = gold_state_seq.long(), mask = tag_mask, reduction = 'token_mean')
 
@@ -105,7 +113,7 @@ class NCETModel(nn.Module):
         # size (batch, max_cands, max_sents)
         loc_logits = self.LocationPredictor(encoder_out = token_rep, entity_mask = entity_mask, loc_mask = loc_mask,
                                             sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
-                                            cpnet_tokenizer = self.cpnet_tokenizer, cpnet_encoder = self.cpnet_model)
+                                            cpnet_rep = cpnet_rep)
         loc_logits = loc_logits.transpose(-1, -2)  # size (batch, max_sents, max_cands)
         masked_loc_logits = self.mask_loc_logits(loc_logits = loc_logits, num_cands = num_cands)  # (batch, max_sents, max_cands)
         masked_gold_loc_seq = self.mask_undefined_loc(gold_loc_seq = gold_loc_seq, mask_value = PAD_LOC)  # (batch, max_sents)
@@ -259,8 +267,7 @@ class StateTracker(nn.Module):
         self.cpnet_inject = opt.cpnet_inject
 
 
-    def forward(self, encoder_out, entity_mask, verb_mask, sentence_mask, cpnet_triples,
-                cpnet_tokenizer, cpnet_encoder):
+    def forward(self, encoder_out, entity_mask, verb_mask, sentence_mask, cpnet_triples, cpnet_rep):
         """
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
@@ -276,8 +283,8 @@ class StateTracker(nn.Module):
         decoder_in = self.get_masked_input(encoder_out, entity_mask, verb_mask, batch_size = batch_size)
         # (batch, max_sents, 4 * hidden_size)
         if self.cpnet_inject in ['state', 'both']:
-            decoder_in = self.CpnetMemory(encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples,
-                                          cpnet_tokenizer, cpnet_encoder)
+            decoder_in = self.CpnetMemory(encoder_out, decoder_in, entity_mask,
+                                          sentence_mask, cpnet_triples, cpnet_rep)
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         decoder_out = self.Dropout(decoder_out)
         tag_logits = self.Hidden2Tag(decoder_out)  # (batch, max_sents, num_tags)
@@ -350,8 +357,7 @@ class LocationPredictor(nn.Module):
         self.cpnet_inject = opt.cpnet_inject
 
 
-    def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples,
-                cpnet_tokenizer, cpnet_encoder):
+    def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples, cpnet_rep):
         """
         Args:
             encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
@@ -372,8 +378,7 @@ class LocationPredictor(nn.Module):
                                           entity_mask=NCETModel.expand_dim_3d(entity_mask, max_cands),
                                           sentence_mask=NCETModel.expand_dim_3d(sentence_mask, max_cands),
                                           cpnet_triples=cpnet_triples,
-                                          cpnet_tokenizer = cpnet_tokenizer,
-                                          cpnet_encoder = cpnet_encoder,
+                                          cpnet_rep=cpnet_rep,
                                           loc_mask = loc_mask.view(batch_size*max_cands, max_sents, -1))
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         assert decoder_out.size() == (batch_size * max_cands, max_sents, 2 * self.hidden_size)
@@ -467,11 +472,6 @@ class CpnetMemory(nn.Module):
         super(CpnetMemory, self).__init__()
         self.cuda = not opt.no_cuda
         self.hidden_size = opt.hidden_size
-        # whether to fine-tune the language model or not
-        if opt.cpnet_finetune:
-            self.CpnetEncoder = FineTuneSentEncoder(opt)
-        else:
-            self.CpnetEncoder = FixedSentEncoder(opt)
         self.query_size = query_size
         self.value_size = MODEL_HIDDEN[opt.cpnet_enc_name]
         self.input_size = input_size
@@ -480,7 +480,7 @@ class CpnetMemory(nn.Module):
 
 
     def forward(self, encoder_out, decoder_in, entity_mask, sentence_mask, cpnet_triples: List[List[str]],
-                cpnet_tokenizer, cpnet_encoder, loc_mask = None):
+                cpnet_rep, loc_mask = None):
         """
         Args:
             encoder_out: size (batch, max_tokens, 2 * hidden_size)
@@ -500,7 +500,6 @@ class CpnetMemory(nn.Module):
         if self.cuda:
             attn_mask = attn_mask.cuda()
 
-        cpnet_rep = self.CpnetEncoder(cpnet_triples, cpnet_tokenizer, cpnet_encoder)
         if loc_mask is not None:
             assert cpnet_rep.size(0) != batch_size, batch_size % cpnet_rep.size(0) == 0
             max_cands = batch_size // cpnet_rep.size(0)
