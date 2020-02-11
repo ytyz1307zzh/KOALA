@@ -47,11 +47,11 @@ class NCETModel(nn.Module):
         self.cpnet_config = cpnet_config_class.from_pretrained(opt.cpnet_enc_name)
         self.cpnet_tokenizer = cpnet_tokenizer_class.from_pretrained(opt.cpnet_enc_name)
         if is_test:
-            self.cpnet_model = cpnet_model_class(config=self.cpnet_config)  # use saved parameters
+            self.cpnet_encoder = cpnet_model_class(config=self.cpnet_config)  # use saved parameters
         else:
-            self.cpnet_model = cpnet_model_class.from_pretrained(opt.cpnet_enc_name)
+            self.cpnet_encoder = cpnet_model_class.from_pretrained(opt.cpnet_enc_name)
         if not opt.cpnet_finetune:  # if you choose to fix the params
-            for param in self.cpnet_model.parameters():
+            for param in self.cpnet_encoder.parameters():
                 param.requires_grad = False
         print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
 
