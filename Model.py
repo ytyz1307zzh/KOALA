@@ -263,7 +263,7 @@ class StateTracker(nn.Module):
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
         self.Hidden2Tag = Linear(d_in = 2 * opt.hidden_size, d_out = NUM_STATES, dropout = 0)
-        self.CpnetMemory = CpnetMemory(opt, query_size = 2 * opt.hidden_size, input_size = 4 * opt.hidden_size)
+        self.CpnetMemory = CpnetMemory(opt, query_size = 4 * opt.hidden_size, input_size = 4 * opt.hidden_size)
         self.cpnet_inject = opt.cpnet_inject
 
 
@@ -353,7 +353,7 @@ class LocationPredictor(nn.Module):
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
         self.Hidden2Score = Linear(d_in = 2 * opt.hidden_size, d_out = 1, dropout = 0)
-        self.CpnetMemory = CpnetMemory(opt, query_size=2 * opt.hidden_size, input_size=4 * opt.hidden_size)
+        self.CpnetMemory = CpnetMemory(opt, query_size=4 * opt.hidden_size, input_size=4 * opt.hidden_size)
         self.cpnet_inject = opt.cpnet_inject
 
 
@@ -493,9 +493,11 @@ class CpnetMemory(nn.Module):
         assert encoder_out.size(0) == decoder_in.size(0) == entity_mask.size(0) == \
                 sentence_mask.size(0)
         batch_size = encoder_out.size(0)
+
         # use the embedding of the current sentence as the attention query
         # (batch, max_sents, 2 * hidden_size)
-        query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
+        # query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
+        query = decoder_in
         attn_mask = self.get_attn_mask(cpnet_triples)
         if self.cuda:
             attn_mask = attn_mask.cuda()
@@ -507,10 +509,10 @@ class CpnetMemory(nn.Module):
             attn_mask = NCETModel.expand_dim_2d(attn_mask, loc_cands=max_cands)
         update_in = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask)
 
-        mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
-        if loc_mask is not None:
-            mask_vec += torch.sum(loc_mask, dim=-1, keepdim=True)
-        update_in = update_in.masked_fill(mask_vec==0, value=0)
+        # mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
+        # if loc_mask is not None:
+        #     mask_vec += torch.sum(loc_mask, dim=-1, keepdim=True)
+        # update_in = update_in.masked_fill(mask_vec==0, value=0)
 
         return update_in
 
@@ -568,6 +570,8 @@ class GatedAttnUpdate(nn.Module):
         self.concat_fc = Linear(input_size + value_size, input_size, dropout=dropout)
         self.Dropout = nn.Dropout(p=dropout)
 
+        self.attn_log = []
+
     def forward(self, query, values, ori_input, attn_mask):
         """
         :param query: (batch, max_sents, query_size)
@@ -593,6 +597,7 @@ class GatedAttnUpdate(nn.Module):
             attn_mask = attn_mask.unsqueeze(1)
             S = S.masked_fill(attn_mask == 0, float('-inf'))
         probs = F.softmax(S, dim=-1)  # attention weights, (batch, max_sents, num_cands)
+        self.attn_log.extend(probs.tolist())
         is_nan = torch.isnan(probs)
         probs = probs.masked_fill(is_nan, value=0)  # if no valid triple exist, the system will output nan
         C = torch.bmm(probs, values).squeeze()  # weighted sum, (batch, max_sents, value_size)
