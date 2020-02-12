@@ -10,6 +10,7 @@ import_start_time = time.time()
 import torch
 import json
 import os
+import pdb
 import numpy as np
 from typing import List, Dict
 from Constants import *
@@ -30,14 +31,15 @@ torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False)
 parser = argparse.ArgumentParser()
 
 # model parameters
-parser.add_argument('-batch_size', type=int, default=64)
+parser.add_argument('-per_gpu_batch_size', type=int, default=64)
 parser.add_argument('-embed_size', type=int, default=128, help="embedding size (including the verb indicator)")
 parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of lstm")
 parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
 parser.add_argument('-elmo_dropout', type=float, default=0.5, help="dropout rate of elmo embedding")
 parser.add_argument('-loc_loss', type=float, default=0.3, help="hyper-parameter to weight location loss and state_loss")
-parser.add_argument("-max_grad_norm", default=1.0, type=float, help="Max gradient norm")
+parser.add_argument('-max_grad_norm', default=1.0, type=float, help="Max gradient norm")
+parser.add_argument('-grad_accum_step', default=1, type=int, help='gradient accumulation steps')
 
 # training parameters
 parser.add_argument('-mode', type=str, choices=['train', 'test'], default='train', help="train or test")
@@ -72,6 +74,12 @@ parser.add_argument('-no_cuda', action='store_true', default=False, help="if tru
 
 opt = parser.parse_args()
 
+try:
+    opt.n_gpu = len(os.environ["CUDA_VISIBLE_DEVICES"].split(','))
+except KeyError:  # did not specify device from cmd
+    opt.n_gpu = 1
+opt.batch_size = opt.per_gpu_batch_size * opt.n_gpu
+
 if opt.ckpt_dir and not os.path.exists(opt.ckpt_dir):
     os.mkdir(opt.ckpt_dir)
 if opt.ckpt_dir:
@@ -91,7 +99,8 @@ output('-' * 50)
 assert opt.report >= 1
 
 torch.manual_seed(1234)
-torch.cuda.manual_seed(1234)
+if opt.n_gpu > 0:
+    torch.cuda.manual_seed_all(1234)
 
 
 def save_model(path: str, model: nn.Module):
@@ -102,7 +111,9 @@ def save_model(path: str, model: nn.Module):
         print("[ERROR] Intended to store checkpoint but no checkpoint directory is specified.")
         raise RuntimeError("Did not specify -ckpt_dir option")
 
-    model_state_dict = model.state_dict()
+    model_to_save = model.module if hasattr(model, "module") else model
+
+    model_state_dict = model_to_save.state_dict()
     torch.save(model_state_dict, path)
 
 
@@ -125,6 +136,8 @@ def train():
     model = NCETModel(opt = opt, is_test = False)
     if not opt.no_cuda:
         model.cuda()
+        if opt.n_gpu > 1:
+            model = nn.DataParallel(model)
 
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=opt.lr)
     best_score = np.NINF
@@ -138,6 +151,7 @@ def train():
         opt.impatience = np.inf
 
     print('Start training...')
+    model.zero_grad()
 
     while epoch_i < opt.epoch:
 
@@ -154,13 +168,14 @@ def train():
             total_batches = train_instances // opt.batch_size
         else:
             total_batches = train_instances // opt.batch_size + 1
-        report_batch = get_report_time(total_batches = total_batches, report_times = opt.report)  # when to report results
+        report_batch = get_report_time(total_batches = total_batches,
+                                       report_times = opt.report,
+                                       grad_accum_step = opt.grad_accum_step)  # when to report results
 
         for batch in train_batch:
             # with open('logs/debug.log', 'w', encoding='utf-8') as debug_file:
             #     torch.set_printoptions(threshold=np.inf)
             #     print(batch, file = debug_file)
-            model.zero_grad()
 
             paragraphs = batch['paragraph']
             char_paragraph = batch_to_ids(paragraphs)
@@ -191,10 +206,14 @@ def train():
             train_state_loss, train_loc_loss, train_state_correct, train_state_pred,\
                 train_loc_correct, train_loc_pred = train_result
 
+            if opt.n_gpu > 1:
+                train_state_loss = train_state_loss.mean()
+                train_loc_loss = train_loc_loss.mean()
+
             train_loss = train_state_loss + opt.loc_loss * train_loc_loss
+            if opt.grad_accum_step > 1:
+                train_loss = train_loss / opt.grad_accum_step
             train_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), opt.max_grad_norm)
-            optimizer.step()
 
             report_state_loss += train_state_loss.item() * train_state_pred
             report_loc_loss += train_loc_loss.item() * train_loc_pred
@@ -204,53 +223,58 @@ def train():
             report_loc_pred += train_loc_pred
             batch_cnt += 1
 
-            # time to report results
-            if batch_cnt in report_batch:
+            if batch_cnt % opt.grad_accum_step == 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), opt.max_grad_norm)
+                optimizer.step()
+                model.zero_grad()
 
-                state_loss = report_state_loss / report_state_pred  # average over all elements
-                loc_loss = report_loc_loss / report_loc_pred
-                total_loss = state_loss + opt.loc_loss * loc_loss
-                state_accuracy = report_state_correct / report_state_pred
-                loc_accuracy = report_loc_correct / report_loc_pred
-                total_accuracy = (report_state_correct + report_loc_correct) / (report_state_pred + report_loc_pred)
+                # time to report results
+                if batch_cnt in report_batch:
 
-                output('*' * 50)
-                output(f'{batch_cnt}/{total_batches}, Epoch {epoch_i+1}:\n'
-                       f'Loss: {total_loss:.3f}, State Loss: {state_loss:.3f}, '
-                       f'Location Loss: {loc_loss:.3f}\n'
-                       f'Total Accuracy: {total_accuracy*100:.3f}%, '
-                       f'State Prediction Accuracy: {state_accuracy*100:.3f}%, '
-                       f'Location Accuracy: {loc_accuracy*100:.3f}% \n'
-                       f'Time Elapse: {time.time()-start_time:.2f}s')
-                output('-' * 50)
+                    state_loss = report_state_loss / report_state_pred  # average over all elements
+                    loc_loss = report_loc_loss / report_loc_pred
+                    total_loss = state_loss + opt.loc_loss * loc_loss
+                    state_accuracy = report_state_correct / report_state_pred
+                    loc_accuracy = report_loc_correct / report_loc_pred
+                    total_accuracy = (report_state_correct + report_loc_correct) / (report_state_pred + report_loc_pred)
 
-                model.eval()
-                eval_score = evaluate(dev_set, model)
-                model.train()
+                    output('*' * 50)
+                    output(f'{batch_cnt}/{total_batches}, Epoch {epoch_i+1}:\n'
+                           f'Loss: {total_loss:.3f}, State Loss: {state_loss:.3f}, '
+                           f'Location Loss: {loc_loss:.3f}\n'
+                           f'Total Accuracy: {total_accuracy*100:.3f}%, '
+                           f'State Prediction Accuracy: {state_accuracy*100:.3f}%, '
+                           f'Location Accuracy: {loc_accuracy*100:.3f}% \n'
+                           f'Time Elapse: {time.time()-start_time:.2f}s')
+                    output('-' * 50)
 
-                if eval_score > best_score:  # new best score
-                    best_score = eval_score
-                    impatience = 0
-                    output('New best score!')
-                    if opt.save_mode == 'all':
-                        save_model(os.path.join(opt.ckpt_dir, f'best_checkpoint_{best_score:.3f}.pt'), model)
-                    elif opt.save_mode == 'best':
-                        save_model(os.path.join(opt.ckpt_dir, f'best_checkpoint.pt'), model)
-                else:
-                    impatience += 1
-                    output(f'Impatience: {impatience}, best score: {best_score:.3f}.')
-                    if opt.save_mode == 'all':
-                        save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
-                    if impatience >= opt.impatience:
-                        output('Early Stopping!')
-                        if opt.save_mode == 'last':
+                    model.eval()
+                    eval_score = evaluate(dev_set, model)
+                    model.train()
+
+                    if eval_score > best_score:  # new best score
+                        best_score = eval_score
+                        impatience = 0
+                        output('New best score!')
+                        if opt.save_mode == 'all':
+                            save_model(os.path.join(opt.ckpt_dir, f'best_checkpoint_{best_score:.3f}.pt'), model)
+                        elif opt.save_mode == 'best':
+                            save_model(os.path.join(opt.ckpt_dir, f'best_checkpoint.pt'), model)
+                    else:
+                        impatience += 1
+                        output(f'Impatience: {impatience}, best score: {best_score:.3f}.')
+                        if opt.save_mode == 'all':
                             save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
-                        quit()
+                        if impatience >= opt.impatience:
+                            output('Early Stopping!')
+                            if opt.save_mode == 'last':
+                                save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
+                            quit()
 
-                report_state_loss, report_loc_loss = 0, 0
-                report_state_correct, report_state_pred = 0, 0
-                report_loc_correct, report_loc_pred = 0, 0
-                start_time = time.time()
+                    report_state_loss, report_loc_loss = 0, 0
+                    report_state_correct, report_state_pred = 0, 0
+                    report_loc_correct, report_loc_pred = 0, 0
+                    start_time = time.time()
 
         epoch_i += 1
 
@@ -302,6 +326,10 @@ def evaluate(dev_set, model):
 
             eval_state_loss, eval_loc_loss, eval_state_correct, eval_state_pred, \
                 eval_loc_correct, eval_loc_pred = eval_result
+
+            if opt.n_gpu > 1:
+                eval_state_loss = eval_state_loss.mean()
+                eval_loc_loss = eval_loc_loss.mean()
 
             report_state_loss += eval_state_loss.item() * eval_state_pred
             report_loc_loss += eval_loc_loss.item() * eval_loc_pred
