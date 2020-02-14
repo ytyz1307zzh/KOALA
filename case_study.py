@@ -16,7 +16,7 @@ import re
 import pdb
 import argparse
 print(f'[INFO] Import modules time: {time.time() - import_start_time}s')
-torch.set_printoptions(threshold=np.inf)
+torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False)
 
 parser = argparse.ArgumentParser()
 
@@ -100,6 +100,7 @@ def get_output(metadata: Dict, pred_state_seq: List[int], pred_loc_seq: List[int
     entity_name = metadata['entity']
     loc_cand_list = metadata['loc_cand_list']
     total_sents = metadata['total_sents']
+    loc_cands = metadata['loc_cand_list']
 
     pred_state_seq = [idx2state[idx] for idx in pred_state_seq]
     gold_state_seq = [idx2state[idx] for idx in gold_state_seq if idx != PAD_STATE]
@@ -117,6 +118,7 @@ def get_output(metadata: Dict, pred_state_seq: List[int], pred_loc_seq: List[int
     result = {'id': para_id,
               'entity': entity_name,
               'total_sents': total_sents,
+              'loc_cands': loc_cand_list,
               'prediction': prediction,
               'cpnet': cpnet_triples
               }
@@ -142,8 +144,11 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
 
     for i in range(total_instances):
         instance = output[i]
+        loc_cands = instance['loc_cands']
+        assert len(loc_cands) > 3
         cpnet_triples = instance['cpnet']
-        cpnet_line = ['' for _ in range(8)] + cpnet_triples
+        loc_cand_line = [f'loc: {loc_cands[0]}/{loc_cands[1]}/{loc_cands[2]}']
+        cpnet_line = ['' for _ in range(7)] + loc_cand_line + cpnet_triples
         output_file.write('\t'.join(cpnet_line) + '\n')
         sentence_list = sentences[i]
         sentence_list.insert(0, 'N/A')
@@ -152,7 +157,7 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
         entity_name = instance['entity']
         total_sents = instance['total_sents']
         state_attn_list = state_attn_log[i]
-        loc_attn_list = loc_attn_log[i]
+        loc_attn_list = loc_attn_log[i][:3]
 
         correct_state, correct_loc = 0, 0
 
@@ -161,8 +166,10 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
 
             fields = [str(para_id), str(step_i), entity_name, pred_state, gold_state, pred_loc, gold_loc, sentence_list[step_i]]
             if step_i > 0:
-                fields += [f'{state_attn:.2f}/{loc_attn:.2f}' for state_attn, loc_attn in
-                           zip(state_attn_list[step_i-1], loc_attn_list[step_i-1])]
+                fields += [f'{state_attn:.2f}/{loc0_attn:.2f}/{loc1_attn:.2f}/{loc2_attn:.2f}'
+                           for state_attn, loc0_attn, loc1_attn, loc2_attn in
+                           zip(state_attn_list[step_i-1], loc_attn_list[0][step_i-1],
+                               loc_attn_list[1][step_i - 1], loc_attn_list[2][step_i-1])]
 
             if pred_state == gold_state and step_i > 0:
                 correct_state += 1
@@ -262,7 +269,7 @@ def test(test_set, model):
            f'Location Accuracy: {loc_accuracy * 100:.3f}%')
 
     state_attn_log = model.StateTracker.CpnetMemory.AttnUpdate.attn_log
-    loc_attn_log = model.StateTracker.CpnetMemory.AttnUpdate.attn_log
+    loc_attn_log = model.LocationPredictor.CpnetMemory.AttnUpdate.attn_log
 
     write_output(output = output_result, output_filepath = opt.output, sentences = all_sentences,
                  state_attn_log = state_attn_log, loc_attn_log = loc_attn_log, cpnet_cands = cpnet_cands)

@@ -493,6 +493,7 @@ class CpnetMemory(nn.Module):
         assert encoder_out.size(0) == decoder_in.size(0) == entity_mask.size(0) == \
                 sentence_mask.size(0)
         batch_size = encoder_out.size(0)
+        ori_batch_size = cpnet_rep.size(0)
 
         # use the embedding of the current sentence as the attention query
         # (batch, max_sents, 2 * hidden_size)
@@ -507,7 +508,8 @@ class CpnetMemory(nn.Module):
             max_cands = batch_size // cpnet_rep.size(0)
             cpnet_rep = NCETModel.expand_dim_3d(cpnet_rep, loc_cands=max_cands)
             attn_mask = NCETModel.expand_dim_2d(attn_mask, loc_cands=max_cands)
-        update_in = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask)
+        update_in = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask,
+                                    ori_batch_size = ori_batch_size)
 
         # mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
         # if loc_mask is not None:
@@ -572,7 +574,7 @@ class GatedAttnUpdate(nn.Module):
 
         self.attn_log = []
 
-    def forward(self, query, values, ori_input, attn_mask):
+    def forward(self, query, values, ori_input, attn_mask, ori_batch_size: int):
         """
         :param query: (batch, max_sents, query_size)
         :param values: (batch, num_cands, value_size)
@@ -597,7 +599,10 @@ class GatedAttnUpdate(nn.Module):
             attn_mask = attn_mask.unsqueeze(1)
             S = S.masked_fill(attn_mask == 0, float('-inf'))
         probs = F.softmax(S, dim=-1)  # attention weights, (batch, max_sents, num_cands)
-        self.attn_log.extend(probs.tolist())
+        if ori_batch_size != batch_size:
+            self.attn_log.extend(probs.view(ori_batch_size, -1, max_sents, num_cands).tolist())
+        else:
+            self.attn_log.extend(probs.tolist())
         is_nan = torch.isnan(probs)
         probs = probs.masked_fill(is_nan, value=0)  # if no valid triple exist, the system will output nan
         C = torch.bmm(probs, values).squeeze()  # weighted sum, (batch, max_sents, value_size)
