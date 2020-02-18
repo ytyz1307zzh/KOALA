@@ -74,7 +74,7 @@ class NCETModel(nn.Module):
 
     def forward(self, char_paragraph: torch.Tensor, entity_mask: torch.IntTensor, verb_mask: torch.IntTensor,
                 loc_mask: torch.IntTensor, gold_loc_seq: torch.IntTensor, gold_state_seq: torch.IntTensor,
-                num_cands: torch.IntTensor, sentence_mask: torch.IntTensor, cpnet_triples: List):
+                num_cands: torch.IntTensor, sentence_mask: torch.IntTensor, cpnet_triples: List, print_hidden):
         """
         Args:
             gold_loc_seq: size (batch, max_sents)
@@ -206,7 +206,8 @@ class NCETEmbedding(nn.Module):
         self.weight_file = os.path.join(elmo_dir, 'elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5')
         self.elmo = Elmo(self.options_file, self.weight_file, num_output_representations=1, requires_grad=False,
                             do_layer_norm=False, dropout=elmo_dropout)
-        self.embed_project = Linear(1024, self.embed_size - 1, dropout = dropout)  # 1024 is the default size of Elmo, leave 1 dim for verb indicator
+        if embed_size != 1025:
+            self.embed_project = Linear(1024, self.embed_size - 1, dropout = dropout)  # 1024 is the default size of Elmo, leave 1 dim for verb indicator
 
 
     def forward(self, char_paragraph: torch.Tensor, verb_mask: torch.IntTensor):

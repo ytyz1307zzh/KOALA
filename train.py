@@ -199,9 +199,15 @@ def train():
                 gold_state_seq = gold_state_seq.cuda()
                 num_cands = num_cands.cuda()
 
+            if batch_cnt == 0 or batch_cnt in report_batch:
+                print_hidden = True
+            else:
+                print_hidden = False
+
             train_result = model(char_paragraph = char_paragraph, entity_mask = entity_mask, verb_mask = verb_mask,
                                  loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
-                                 num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples)
+                                 num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
+                                 print_hidden = print_hidden)
 
             train_state_loss, train_loc_loss, train_state_correct, train_state_pred,\
                 train_loc_correct, train_loc_pred = train_result
@@ -294,6 +300,7 @@ def evaluate(dev_set, model):
     report_state_loss, report_loc_loss = 0, 0
     report_state_correct, report_state_pred = 0, 0
     report_loc_correct, report_loc_pred = 0, 0
+    batch_cnt = 0
 
     with torch.no_grad():
         for batch in dev_batch:
@@ -320,9 +327,15 @@ def evaluate(dev_set, model):
                 gold_state_seq = gold_state_seq.cuda()
                 num_cands = num_cands.cuda()
 
+            if batch_cnt == 0:
+                print_hidden = True
+            else:
+                print_hidden = False
+
             eval_result = model(char_paragraph = char_paragraph, entity_mask = entity_mask, verb_mask = verb_mask,
                                 loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
-                                num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples)
+                                num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
+                                print_hidden = print_hidden)
 
             eval_state_loss, eval_loc_loss, eval_state_correct, eval_state_pred, \
                 eval_loc_correct, eval_loc_pred = eval_result
@@ -337,6 +350,8 @@ def evaluate(dev_set, model):
             report_state_pred += eval_state_pred
             report_loc_correct += eval_loc_correct
             report_loc_pred += eval_loc_pred
+
+            batch_cnt += 1
 
     state_loss = report_state_loss / report_state_pred  # average over all elements
     loc_loss = report_loc_loss / report_loc_pred
@@ -366,6 +381,7 @@ def test(test_set, model):
     report_state_correct, report_state_pred = 0, 0
     report_loc_correct, report_loc_pred = 0, 0
     output_result = {}
+    batch_cnt = 0
 
     with torch.no_grad():
         for batch in test_batch:
@@ -392,9 +408,15 @@ def test(test_set, model):
                 gold_state_seq = gold_state_seq.cuda()
                 num_cands = num_cands.cuda()
 
+            if batch_cnt == 0:
+                print_hidden = True
+            else:
+                print_hidden = False
+
             test_result = model(char_paragraph=char_paragraph, entity_mask=entity_mask, verb_mask=verb_mask,
                                 loc_mask=loc_mask, gold_loc_seq=gold_loc_seq, gold_state_seq=gold_state_seq,
-                                num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples)
+                                num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples,
+                                print_hidden=print_hidden)
 
             pred_state_seq, pred_loc_seq, test_state_correct, test_state_pred,\
                 test_loc_correct, test_loc_pred = test_result
@@ -410,6 +432,8 @@ def test(test_set, model):
             report_state_pred += test_state_pred
             report_loc_correct += test_loc_correct
             report_loc_pred += test_loc_pred
+
+            batch_cnt += 1
 
     total_accuracy = (report_state_correct + report_loc_correct) / (report_state_pred + report_loc_pred)
     state_accuracy = report_state_correct / report_state_pred
