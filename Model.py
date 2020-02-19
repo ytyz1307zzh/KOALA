@@ -30,36 +30,36 @@ class NCETModel(nn.Module):
         super(NCETModel, self).__init__()
         self.opt = opt
         self.hidden_size = opt.hidden_size
-        self.embed_size = opt.embed_size
+        self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
 
-        self.EmbeddingLayer = NCETEmbedding(embed_size = opt.embed_size, elmo_dir = opt.elmo_dir,
-                                            dropout = opt.dropout, elmo_dropout = opt.elmo_dropout)
-        self.TokenEncoder = nn.LSTM(input_size = opt.embed_size, hidden_size = opt.hidden_size,
+        self.TokenEncoder = nn.LSTM(input_size = self.embed_size, hidden_size = opt.hidden_size,
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
 
         # fixed pretrained language model
-        assert opt.cpnet_enc_name in MODEL_HIDDEN.keys(), 'Wrong model name provided'
-        cpnet_model_class, cpnet_tokenizer_class, cpnet_config_class = MODEL_CLASSES[opt.cpnet_enc_class]
+        assert opt.plm_model_name in MODEL_HIDDEN.keys(), 'Wrong model name provided'
+        plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
 
-        print(f'[INFO] Loading pretrained {opt.cpnet_enc_name}...')
-        start_time = time.time()
-        self.cpnet_config = cpnet_config_class.from_pretrained(opt.cpnet_enc_name)
-        self.cpnet_tokenizer = cpnet_tokenizer_class.from_pretrained(opt.cpnet_enc_name)
+        self.plm_config = plm_config_class.from_pretrained(opt.plm_model_name)
+        self.plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
+
+        # ConceptNet encoder
+        # if is_test:
+        #     self.cpnet_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
+        # else:
+        #     self.cpnet_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
+        # for param in self.cpnet_encoder.parameters():
+        #     param.requires_grad = False
+
+        # Embedding language model
         if is_test:
-            self.cpnet_encoder = cpnet_model_class(config=self.cpnet_config)  # use saved parameters
+            self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
         else:
-            self.cpnet_encoder = cpnet_model_class.from_pretrained(opt.cpnet_enc_name)
-        if not opt.cpnet_finetune:  # if you choose to fix the params
-            for param in self.cpnet_encoder.parameters():
-                param.requires_grad = False
-        print(f'[INFO] Model loaded. Time elapse: {time.time() - start_time:.2f}s')
+            self.embed_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
+        for param in self.embed_encoder.parameters():
+            param.requires_grad = False
 
-        # whether to fine-tune the language model or not
-        if opt.cpnet_finetune:
-            self.CpnetEncoder = FineTuneSentEncoder(opt)
-        else:
-            self.CpnetEncoder = FixedSentEncoder(opt)
+        self.CpnetEncoder = FixedSentEncoder(opt)
 
         # state tracking modules
         self.StateTracker = StateTracker(opt)
@@ -72,28 +72,32 @@ class NCETModel(nn.Module):
         self.is_test = is_test
         
 
-    def forward(self, char_paragraph: torch.Tensor, entity_mask: torch.IntTensor, verb_mask: torch.IntTensor,
+    def forward(self, token_ids: torch.Tensor, entity_mask: torch.IntTensor, verb_mask: torch.IntTensor,
                 loc_mask: torch.IntTensor, gold_loc_seq: torch.IntTensor, gold_state_seq: torch.IntTensor,
                 num_cands: torch.IntTensor, sentence_mask: torch.IntTensor, cpnet_triples: List, print_hidden):
         """
         Args:
+            token_ids: size (batch, max_tokens)
             gold_loc_seq: size (batch, max_sents)
             gold_state_seq: size (batch, max_sents)
             num_cands: size(batch,)
         """
         assert entity_mask.size(-2) == verb_mask.size(-2) == loc_mask.size(-2) == gold_state_seq.size(-1) == gold_loc_seq.size(-1)
-        assert entity_mask.size(-1) == verb_mask.size(-1) == loc_mask.size(-1) == char_paragraph.size(-2)
-        batch_size = char_paragraph.size(0)
-        max_tokens = char_paragraph.size(1)
+        assert entity_mask.size(-1) == verb_mask.size(-1) == loc_mask.size(-1) == token_ids.size(-1)
+        batch_size = token_ids.size(0)
+        max_tokens = token_ids.size(1)
         max_sents = gold_state_seq.size(-1)
         max_cands = loc_mask.size(-3)
 
-        embeddings = self.EmbeddingLayer(char_paragraph, verb_mask)  # (batch, max_tokens, embed_size)
+        attention_mask = (token_ids != self.plm_tokenizer.pad_token_id).to(torch.int)
+        plm_outputs = self.embed_encoder(token_ids, attention_mask=attention_mask)
+        embeddings = plm_outputs[0]  # hidden states at the last layer, (batch, max_tokens, plm_hidden_size)
+
         token_rep, _ = self.TokenEncoder(embeddings)  # (batch, max_tokens, 2*hidden_size)
         token_rep = self.Dropout(token_rep)
         assert token_rep.size() == (batch_size, max_tokens, 2 * self.hidden_size)
 
-        cpnet_rep = self.CpnetEncoder(cpnet_triples, self.cpnet_tokenizer, self.cpnet_encoder)
+        cpnet_rep = self.CpnetEncoder(cpnet_triples, self.plm_tokenizer, self.embed_encoder)
 
         # state change prediction
         # size (batch, max_sents, NUM_STATES)
@@ -194,62 +198,6 @@ class NCETModel(nn.Module):
         vec = vec.unsqueeze(1).repeat(1, loc_cands, 1)
         vec = vec.view(batch_size * loc_cands, seq_len)
         return vec
-
-    
-class NCETEmbedding(nn.Module):
-
-    def __init__(self, embed_size: int, elmo_dir: str, dropout: float, elmo_dropout: float):
-
-        super(NCETEmbedding, self).__init__()
-        self.embed_size = embed_size
-        self.options_file = os.path.join(elmo_dir, 'elmo_2x4096_512_2048cnn_2xhighway_options.json')
-        self.weight_file = os.path.join(elmo_dir, 'elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5')
-        self.elmo = Elmo(self.options_file, self.weight_file, num_output_representations=1, requires_grad=False,
-                            do_layer_norm=False, dropout=elmo_dropout)
-        if embed_size != 1025:
-            self.embed_project = Linear(1024, self.embed_size - 1, dropout = dropout)  # 1024 is the default size of Elmo, leave 1 dim for verb indicator
-
-
-    def forward(self, char_paragraph: torch.Tensor, verb_mask: torch.IntTensor):
-        """
-        Args: 
-            char_paragraph - character ids of the paragraph, generated by function "batch_to_ids"
-            verb_mask - size (batch, max_sents, max_tokens)
-        Return:
-            embeddings - token embeddings, size (batch, max_tokens, embed_size)
-        """
-        batch_size = char_paragraph.size(0)
-        max_tokens = char_paragraph.size(1)
-
-        elmo_embeddings = self.get_elmo(char_paragraph, batch_size = batch_size, max_tokens = max_tokens)
-        if self.embed_size != 1025:
-            elmo_embeddings = self.embed_project(elmo_embeddings)
-        verb_indicator = self.get_verb_indicator(verb_mask, batch_size = batch_size, max_tokens = max_tokens)
-        embeddings = torch.cat([elmo_embeddings, verb_indicator], dim = -1)
-
-        assert embeddings.size() == (batch_size, max_tokens, self.embed_size)
-        return embeddings
-
-
-    def get_elmo(self, char_paragraph: torch.Tensor, batch_size: int, max_tokens: int):
-        """
-        Compute the Elmo embedding of the paragraphs.
-        Return:
-            Elmo embeddings, size(batch, max_tokens, elmo_embed_size=1024)
-        """
-        # embeddings['elmo_representations'] is a list of tensors with length 'num_output_representations' (here it = 1)
-        elmo_embeddings = self.elmo(char_paragraph)['elmo_representations'][0]  # (batch, max_tokens, elmo_embed_size=1024)
-        assert elmo_embeddings.size() == (batch_size, max_tokens, 1024)
-        return elmo_embeddings
-
-    
-    def get_verb_indicator(self, verb_mask: torch.IntTensor, batch_size: int, max_tokens: int):
-        """
-        Get the binary scalar indicator for each token
-        """
-        verb_indicator = torch.sum(verb_mask, dim = 1, dtype = torch.float).unsqueeze(dim = -1)
-        assert verb_indicator.size() == (batch_size, max_tokens, 1)
-        return verb_indicator
 
 
 class StateTracker(nn.Module):
@@ -474,7 +422,7 @@ class CpnetMemory(nn.Module):
         self.cuda = not opt.no_cuda
         self.hidden_size = opt.hidden_size
         self.query_size = query_size
-        self.value_size = MODEL_HIDDEN[opt.cpnet_enc_name]
+        self.value_size = MODEL_HIDDEN[opt.plm_model_name]
         self.input_size = input_size
         self.AttnUpdate = GatedAttnUpdate(query_size=self.query_size, value_size=self.value_size,
                                           input_size=self.input_size, dropout=opt.dropout)
@@ -625,7 +573,7 @@ class FineTuneSentEncoder(nn.Module):
     """
     def __init__(self, opt):
         super(FineTuneSentEncoder, self).__init__()
-        self.hidden_size = MODEL_HIDDEN[opt.cpnet_enc_name]
+        self.hidden_size = MODEL_HIDDEN[opt.plm_model_name]
         self.lm_batch_size = opt.batch_size
 
         self.cuda = not opt.no_cuda
@@ -676,7 +624,7 @@ class FixedSentEncoder(nn.Module):
     """
     def __init__(self, opt):
         super(FixedSentEncoder, self).__init__()
-        self.hidden_size = MODEL_HIDDEN[opt.cpnet_enc_name]
+        self.hidden_size = MODEL_HIDDEN[opt.plm_model_name]
         self.lm_batch_size = opt.batch_size
 
         self.cuda = not opt.no_cuda

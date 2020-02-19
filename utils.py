@@ -165,6 +165,36 @@ def get_report_time(total_batches: int, report_times: int, grad_accum_step: int)
     return report_batch
 
 
+def bert_subword_map(origin_tokens: List[str], tokens: List[str]) -> List[int]:
+    """
+    Map the original tokens to tokenized BERT sub-tokens.
+    Args:
+        origin_tokens: List of original tokens.
+        tokens: List of sub-tokens given by a BertTokenizer.
+    Return:
+        offset: A list of original token ids, each indexed by a sub-token id.
+    """
+    offset = []
+    j = 0
+    cur_token = ''
+
+    for i in range(len(tokens)):
+        if cur_token != '':
+            cur_token += tokens[i]
+            if '##' in cur_token:
+                cur_token = cur_token.replace('##', '')
+        else:
+            cur_token = tokens[i]
+        if cur_token != origin_tokens[j].lower() and cur_token != '[UNK]':
+            offset.append(j)
+        else:
+            offset.append(j)
+            j += 1
+            cur_token = ''
+
+    return offset
+
+
 def unpad(source: List[int], pad_value: int) -> List[int]:
     """
     Remove padded elements from a list

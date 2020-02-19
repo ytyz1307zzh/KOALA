@@ -12,11 +12,12 @@ import time
 import numpy as np
 from typing import List, Dict
 from Constants import *
+from utils import *
 
 
 class ProparaDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_path: str, cpnet_path: str, is_test: bool):
+    def __init__(self, data_path: str, cpnet_path: str, tokenizer, is_test: bool):
         super(ProparaDataset, self).__init__()
 
         print('[INFO] Starting load...')
@@ -24,6 +25,7 @@ class ProparaDataset(torch.utils.data.Dataset):
         start_time = time.time()
 
         self.dataset = json.load(open(data_path, 'r', encoding='utf-8'))
+        self.tokenizer = tokenizer
         self.cpnet = self.read_cpnet(cpnet_path)
         self.state2idx = state2idx
         self.idx2state = idx2state
@@ -48,30 +50,38 @@ class ProparaDataset(torch.utils.data.Dataset):
         return cpnet_dict
 
 
-    def get_mask(self, mention_idx: List[int], para_len: int) -> List[int]:
+    def convert_wordmask_to_subwordmask(self, mask, offset_map):
+        num_subword = len(offset_map)
+        return [1 if mask[offset_map[i]] == 1 else 0 for i in range(num_subword)]
+
+
+    def get_word_mask(self, mention_idx: List[int], offset_map: List[int], para_len: int) -> List[int]:
         """
         Given a list of mention positions of the entity/verb/location in a paragraph,
         compute the mask of it.
         """
-        return [1 if i in mention_idx else 0 for i in range(para_len)]
+        word_mask =  [1 if i in mention_idx else 0 for i in range(para_len)]
+        subword_mask = self.convert_wordmask_to_subwordmask(mask=word_mask, offset_map=offset_map)
+        # prepare positions for <CLS> & <SEP>
+        subword_mask = [0] + subword_mask + [0]
+        return subword_mask
 
 
-    def get_sentence_mask(self, sentence_list: List, para_len: int):
+    def get_sentence_mention(self, sentence_list: List, para_len: int):
         """
         Get the indexes of a given sentence.
         """
-        sentence_masks = []
+        sentence_mentions = []
         sentence_lengths = [x['total_tokens'] for x in sentence_list]
         assert sum(sentence_lengths) == para_len
         prev_tokens = 0
 
         for length in sentence_lengths:
-            mask = [0 for _ in range(prev_tokens)] + [1 for _ in range(length)] + [0 for _ in range(
-                para_len - prev_tokens - length)]
-            sentence_masks.append(mask)
+            mention_idx = [idx for idx in range(prev_tokens, prev_tokens + length)]
+            sentence_mentions.append(mention_idx)
             prev_tokens += length
 
-        return sentence_masks
+        return sentence_mentions
 
 
     def find_cpnet(self, para_id: int, entity: str):
@@ -86,20 +96,28 @@ class ProparaDataset(torch.utils.data.Dataset):
 
         entity_name = instance['entity']  # used in the evaluation process
         para_id = instance['id']  # used in the evaluation process
-        total_tokens = instance['total_tokens']  # used in compute mask vector
+        total_words = instance['total_tokens']  # used in compute mask vector
         total_sents = instance['total_sents']
         total_loc_cands = instance['total_loc_candidates']
         loc_cand_list = instance['loc_cand_list']
 
+        paragraph = instance['paragraph']
+        assert len(paragraph.strip().split()) == total_words
+        tokens = self.tokenizer.tokenize(paragraph)
+        if isinstance(self.tokenizer, BertTokenizer):
+            offset_map = bert_subword_map(origin_tokens=paragraph.strip().split(), tokens=tokens)
+        else:
+            raise ValueError(f'Did not provide mapping function for tokenizer {type(self.tokenizer)}')
+
         metadata = {'para_id': para_id,
                     'entity': entity_name,
+                    'total_subwords': len(tokens)+2,  # subwords + <CLS> + <SEP>
                     'total_sents': total_sents,
                     'total_loc_cands': total_loc_cands,
                     'loc_cand_list': loc_cand_list,
                     'raw_gold_loc': instance['gold_loc_seq']
                     }
-        paragraph = instance['paragraph'].strip().split()  # Elmo processes list of words     
-        assert len(paragraph) == total_tokens
+
         gold_state_seq = torch.IntTensor([self.state2idx[label] for label in instance['gold_state_seq']])
 
         loc2idx = {loc_cand_list[idx]: idx for idx in range(total_loc_cands)}
@@ -116,16 +134,22 @@ class ProparaDataset(torch.utils.data.Dataset):
         sentence_list = instance['sentence_list']
         sentences = [x['sentence'] for x in sentence_list]
         assert total_sents == len(sentence_list)
+        sentence_mention = self.get_sentence_mention(sentence_list, total_words)
 
         # (num_sent, num_tokens)
-        sentence_mask_list = torch.IntTensor(self.get_sentence_mask(sentence_list, total_tokens))
+        sentence_mask_list = torch.IntTensor([self.get_word_mask(sentence_mention[i], offset_map, total_words)
+                                            for i in range(len(sentence_mention))])
         # (num_sent, num_tokens)
-        entity_mask_list = torch.IntTensor([self.get_mask(sent['entity_mention'], total_tokens) for sent in sentence_list])
+        entity_mask_list = torch.IntTensor([self.get_word_mask(sent['entity_mention'], offset_map, total_words)
+                                            for sent in sentence_list])
         # (num_sent, num_tokens)
-        verb_mask_list = torch.IntTensor([self.get_mask(sent['verb_mention'], total_tokens) for sent in sentence_list])
+        verb_mask_list = torch.IntTensor([self.get_word_mask(sent['verb_mention'], offset_map, total_words)
+                                          for sent in sentence_list])
         # (num_cand, num_sent, num_tokens)
-        loc_mask_list = torch.IntTensor([[self.get_mask(sent['loc_mention_list'][idx], total_tokens) for sent in sentence_list]
-                                            for idx in range(total_loc_cands)])
+        loc_mask_list = torch.IntTensor([[self.get_word_mask(sent['loc_mention_list'][idx], offset_map, total_words)
+                                          for sent in sentence_list] for idx in range(total_loc_cands)])
+        
+        # map word positions to sub-word positions
 
         cpnet_triples = self.find_cpnet(para_id=para_id, entity=entity_name)
 
@@ -172,7 +196,7 @@ class Collate:
         """
         # find max number of sentences & tokens
         max_sents = max([inst['metadata']['total_sents'] for inst in batch])
-        max_tokens = max([len(inst['paragraph']) for inst in batch])
+        max_tokens = max([inst['metadata']['total_subwords'] for inst in batch])
         max_cands = max([inst['metadata']['total_loc_cands'] for inst in batch])
         max_cpnet = max([len(inst['cpnet']) for inst in batch])
         batch_size = len(batch)
@@ -201,7 +225,7 @@ class Collate:
         assert loc_mask.size() == (batch_size, max_cands, max_sents, max_tokens)
 
         return {'metadata': metadata,
-                'paragraph': paragraph,  # unpadded, 2-dimension
+                'paragraph': paragraph,  # unpadded, 1-dimension
                 'sentences': sentences,  # unpadded, 2-dimension
                 'gold_loc_seq': gold_loc_seq,
                 'gold_state_seq': gold_state_seq,

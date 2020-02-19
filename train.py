@@ -32,11 +32,11 @@ parser = argparse.ArgumentParser()
 
 # model parameters
 parser.add_argument('-per_gpu_batch_size', type=int, default=64)
-parser.add_argument('-embed_size', type=int, default=128, help="embedding size (including the verb indicator)")
+parser.add_argument('-plm_model_class', type=str, default='bert', help='pre-trained language model class')
+parser.add_argument('-plm_model_name', type=str, default='bert-base-uncased', help='pre-trained language model name')
 parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of lstm")
 parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
-parser.add_argument('-elmo_dropout', type=float, default=0.5, help="dropout rate of elmo embedding")
 parser.add_argument('-loc_loss', type=float, default=0.3, help="hyper-parameter to weight location loss and state_loss")
 parser.add_argument('-max_grad_norm', default=1.0, type=float, help="Max gradient norm")
 parser.add_argument('-grad_accum_step', default=1, type=int, help='gradient accumulation steps')
@@ -49,7 +49,6 @@ parser.add_argument('-save_mode', type=str, choices=['best', 'all', 'none', 'las
 parser.add_argument('-epoch', type=int, default=100, help="number of epochs, use -1 to rely on early stopping only")
 parser.add_argument('-impatience', type=int, default=20, help='number of evaluation rounds for early stopping, use -1 to disable early stopping')
 parser.add_argument('-report', type=int, default=2, help="report frequence per epoch, should be at least 1")
-parser.add_argument('-elmo_dir', type=str, default='elmo', help="directory that contains options and weight files for allennlp Elmo")
 parser.add_argument('-train_set', type=str, default="data/train.json", help="path to training set")
 parser.add_argument('-dev_set', type=str, default="data/dev.json", help="path to dev set")
 
@@ -62,9 +61,6 @@ parser.add_argument('-output', type=str, default=None, help="path to store predi
 # commonsense parameters
 parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
-parser.add_argument('-cpnet_enc_class', type=str, default='roberta', help='conceptnet encoder class')
-parser.add_argument('-cpnet_enc_name', type=str, default='roberta-large', help='conceptnet encoder name')
-parser.add_argument('-cpnet_finetune', action='store_true', default=False, help='specify to fine-tune the language model')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both'], default='both',
                     help='where to inject ConceptNet commonsense')
 
@@ -79,6 +75,9 @@ try:
 except KeyError:  # did not specify device from cmd
     opt.n_gpu = 1
 opt.batch_size = opt.per_gpu_batch_size * opt.n_gpu
+
+plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
+plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 
 if opt.ckpt_dir and not os.path.exists(opt.ckpt_dir):
     os.mkdir(opt.ckpt_dir)
@@ -119,19 +118,19 @@ def save_model(path: str, model: nn.Module):
 
 def train():
 
-    train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet, is_test = False)
+    train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet, tokenizer=plm_tokenizer, is_test = False)
     shuffle_train = True
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch training set to debug.json' + '*'*20)
-        train_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, is_test = False)
+        train_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, tokenizer=plm_tokenizer, is_test = False)
         shuffle_train = False
 
     train_batch = DataLoader(dataset = train_set, batch_size = opt.batch_size, shuffle = shuffle_train, collate_fn = Collate())
-    dev_set = ProparaDataset(opt.dev_set, cpnet_path=opt.cpnet, is_test = False)
+    dev_set = ProparaDataset(opt.dev_set, cpnet_path=opt.cpnet, tokenizer=plm_tokenizer, is_test = False)
 
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch dev set to debug.json' + '*'*20)
-        dev_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, is_test = False)
+        dev_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, tokenizer=plm_tokenizer, is_test = False)
 
     model = NCETModel(opt = opt, is_test = False)
     if not opt.no_cuda:
@@ -178,7 +177,8 @@ def train():
             #     print(batch, file = debug_file)
 
             paragraphs = batch['paragraph']
-            char_paragraph = batch_to_ids(paragraphs)
+            enc_outputs = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True, return_tensors='pt')
+            token_ids = enc_outputs['input_ids']
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -190,7 +190,7 @@ def train():
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
             if not opt.no_cuda:
-                char_paragraph = char_paragraph.cuda()
+                token_ids = token_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -204,7 +204,7 @@ def train():
             else:
                 print_hidden = False
 
-            train_result = model(char_paragraph = char_paragraph, entity_mask = entity_mask, verb_mask = verb_mask,
+            train_result = model(token_ids=token_ids, entity_mask = entity_mask, verb_mask = verb_mask,
                                  loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
                                  num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
                                  print_hidden = print_hidden)
@@ -306,7 +306,8 @@ def evaluate(dev_set, model):
         for batch in dev_batch:
 
             paragraphs = batch['paragraph']
-            char_paragraph = batch_to_ids(paragraphs)
+            enc_outputs = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True, return_tensors='pt')
+            token_ids = enc_outputs['input_ids']
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -318,7 +319,7 @@ def evaluate(dev_set, model):
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
             if not opt.no_cuda:
-                char_paragraph = char_paragraph.cuda()
+                token_ids = token_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -332,7 +333,7 @@ def evaluate(dev_set, model):
             else:
                 print_hidden = False
 
-            eval_result = model(char_paragraph = char_paragraph, entity_mask = entity_mask, verb_mask = verb_mask,
+            eval_result = model(token_ids = token_ids, entity_mask = entity_mask, verb_mask = verb_mask,
                                 loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
                                 num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
                                 print_hidden = print_hidden)
@@ -387,7 +388,8 @@ def test(test_set, model):
         for batch in test_batch:
 
             paragraphs = batch['paragraph']
-            char_paragraph = batch_to_ids(paragraphs)
+            enc_outputs = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True, return_tensors='pt')
+            token_ids = enc_outputs['input_ids']
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -399,7 +401,7 @@ def test(test_set, model):
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
             if not opt.no_cuda:
-                char_paragraph = char_paragraph.cuda()
+                token_ids = token_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -413,7 +415,7 @@ def test(test_set, model):
             else:
                 print_hidden = False
 
-            test_result = model(char_paragraph=char_paragraph, entity_mask=entity_mask, verb_mask=verb_mask,
+            test_result = model(token_ids=token_ids, entity_mask=entity_mask, verb_mask=verb_mask,
                                 loc_mask=loc_mask, gold_loc_seq=gold_loc_seq, gold_state_seq=gold_state_seq,
                                 num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples,
                                 print_hidden=print_hidden)
@@ -469,11 +471,14 @@ if __name__ == "__main__":
             print('*' * 20 + '[INFO] Debug mode enabled. Switch dummy file to data/dummy-debug.json' + '*' * 20)
             opt.dummy_test = 'data/dummy-debug.tsv'
 
-        test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet, is_test=True)
+        plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
+        plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
+
+        test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet, tokenizer=plm_tokenizer, is_test=True)
 
         if opt.debug:
             print('*' * 20 + '[INFO] Debug mode enabled. Switch test set to debug.json' + '*' * 20)
-            test_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, is_test=True)
+            test_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, tokenizer=plm_tokenizer, is_test=True)
 
         print('[INFO] Start loading trained model...')
         restore_start_time = time.time()
