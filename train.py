@@ -61,7 +61,7 @@ parser.add_argument('-output', type=str, default=None, help="path to store predi
 # commonsense parameters
 parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
-parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both'], default='both',
+parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
 
 # other parameters

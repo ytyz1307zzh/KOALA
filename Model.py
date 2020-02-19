@@ -97,7 +97,7 @@ class NCETModel(nn.Module):
         token_rep = self.Dropout(token_rep)
         assert token_rep.size() == (batch_size, max_tokens, 2 * self.hidden_size)
 
-        cpnet_rep = self.CpnetEncoder(cpnet_triples, self.plm_tokenizer, self.embed_encoder)
+        cpnet_rep = self.CpnetEncoder(cpnet_triples, tokenizer=self.plm_tokenizer, encoder=self.embed_encoder)
 
         # state change prediction
         # size (batch, max_sents, NUM_STATES)
@@ -565,57 +565,6 @@ class GatedAttnUpdate(nn.Module):
         assert final_input.size() == (batch_size, max_sents, self.input_size)
 
         return final_input
-
-
-class FineTuneSentEncoder(nn.Module):
-    """
-    A encoder that acquires sentence embedding from a pretrained language model (to be fine-tuned)
-    """
-    def __init__(self, opt):
-        super(FineTuneSentEncoder, self).__init__()
-        self.hidden_size = MODEL_HIDDEN[opt.plm_model_name]
-        self.lm_batch_size = opt.batch_size
-
-        self.cuda = not opt.no_cuda
-        self.Dropout = nn.Dropout(p=opt.dropout)
-
-
-    def forward(self, input: List[List[str]], tokenizer, encoder):
-        """
-        Args:
-            input: size(batch, num_cands), each is a list of untokenized strings.
-        """
-        batch_size = len(input)
-        num_cands = len(input[0])
-        all_sents = itertools.chain.from_iterable(input)  # batch * num_cands
-        input_ids = list(map(lambda s: tokenizer.encode(s, add_special_tokens=True), all_sents))
-        input_batches = [input_ids[batch_idx * self.lm_batch_size: (batch_idx + 1) * self.lm_batch_size]
-                         for batch_idx in range(len(input_ids) // self.lm_batch_size + 1)]
-        sent_embed = []
-
-        for batch_input_ids in input_batches:
-            mini_batch_size = len(batch_input_ids)
-            if not batch_input_ids:
-                continue
-
-            batch_input_ids, attention_mask, max_len = \
-                FixedSentEncoder.pad_to_longest(batch=batch_input_ids,
-                                                pad_id=tokenizer.pad_token_id)
-            if self.cuda:
-                batch_input_ids = batch_input_ids.cuda()
-                attention_mask = attention_mask.cuda()
-
-            outputs = encoder(batch_input_ids, attention_mask=attention_mask)
-
-            cls_hidden = outputs[1]  # (batch, hidden_size)
-            assert cls_hidden.size() == (mini_batch_size, self.hidden_size)
-            sent_embed.append(cls_hidden)
-
-        sent_embed = torch.cat(sent_embed, dim=0)
-        assert sent_embed.size() == (batch_size * num_cands, self.hidden_size)
-        sent_embed = self.Dropout(sent_embed)
-
-        return sent_embed.view(batch_size, num_cands, self.hidden_size)
 
 
 class FixedSentEncoder(nn.Module):
