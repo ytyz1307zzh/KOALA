@@ -422,7 +422,7 @@ class CpnetMemory(nn.Module):
         self.cuda = not opt.no_cuda
         self.hidden_size = opt.hidden_size
         self.query_size = query_size
-        self.value_size = MODEL_HIDDEN[opt.plm_model_name]
+        self.value_size = 2 * opt.hidden_size
         self.input_size = input_size
         self.AttnUpdate = GatedAttnUpdate(query_size=self.query_size, value_size=self.value_size,
                                           input_size=self.input_size, dropout=opt.dropout)
@@ -575,6 +575,8 @@ class FixedSentEncoder(nn.Module):
         super(FixedSentEncoder, self).__init__()
         self.hidden_size = MODEL_HIDDEN[opt.plm_model_name]
         self.lm_batch_size = opt.batch_size
+        self.LSTM = nn.LSTM(input_size=self.hidden_size, hidden_size=opt.hidden_size,
+                            num_layers=1, batch_first=True, bidirectional=True)
 
         self.cuda = not opt.no_cuda
         self.Dropout = nn.Dropout(p=opt.dropout)
@@ -625,7 +627,10 @@ class FixedSentEncoder(nn.Module):
         assert sent_embed.size() == (batch_size * num_cands, self.hidden_size)
         sent_embed = self.Dropout(sent_embed)
 
-        return sent_embed.view(batch_size, num_cands, self.hidden_size)
+        sent_embed = sent_embed.view(batch_size, num_cands, self.hidden_size)
+        bow_embed, _ = self.LSTM(sent_embed)  # (batch, max_sents, 2 * hidden_size)
+        bow_embed = self.Dropout(bow_embed)
+        return bow_embed
 
 
     @staticmethod
