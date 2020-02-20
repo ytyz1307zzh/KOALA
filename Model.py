@@ -513,8 +513,9 @@ class GatedAttnUpdate(nn.Module):
         self.value_size = value_size
         self.input_size = input_size
 
-        attn_vec = torch.empty(query_size, value_size)
-        nn.init.xavier_normal_(attn_vec)
+        attn_vec = torch.empty(query_size + value_size)
+        lim = 1 / (query_size + value_size)
+        nn.init.uniform_(attn_vec, -math.sqrt(lim), math.sqrt(lim))
         self.attn_vec = nn.Parameter(attn_vec, requires_grad=True)
 
         self.gate_fc = Linear(input_size + value_size, input_size, dropout=dropout)
@@ -541,9 +542,13 @@ class GatedAttnUpdate(nn.Module):
         assert ori_input.size(-1) == self.input_size
 
         # attention
-        attn_vec = self.attn_vec.unsqueeze(0).expand(batch_size, -1, -1)  # (batch, query_size, value_size)
-        # similarity score, (batch, max_sents, num_cands)
-        S = torch.bmm(torch.bmm(query, attn_vec), values.transpose(1, 2))
+        query_exp_shape = (query.size(0), query.size(1), values.size(1), query.size(2))
+        values_exp_shape = (query.size(0), query.size(1), values.size(1), values.size(2))
+        query_exp = query.unsqueeze(2).expand(query_exp_shape)
+        values_exp = values.unsqueeze(1).expand(values_exp_shape)
+        S = torch.cat([query_exp, values_exp], dim=-1)
+        S = torch.matmul(S, self.attn_vec)  # similarity score, (batch, max_sents, num_cands)
+
         if attn_mask is not None:
             attn_mask = attn_mask.unsqueeze(1)
             S = S.masked_fill(attn_mask == 0, float('-inf'))
@@ -573,9 +578,10 @@ class FixedSentEncoder(nn.Module):
     """
     def __init__(self, opt):
         super(FixedSentEncoder, self).__init__()
-        self.hidden_size = MODEL_HIDDEN[opt.plm_model_name]
+        self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
+        self.hidden_size = opt.hidden_size
         self.lm_batch_size = opt.batch_size
-        self.LSTM = nn.LSTM(input_size=self.hidden_size, hidden_size=opt.hidden_size,
+        self.LSTM = nn.LSTM(input_size=self.embed_size, hidden_size=self.hidden_size,
                             num_layers=1, batch_first=True, bidirectional=True)
 
         self.cuda = not opt.no_cuda
@@ -611,10 +617,13 @@ class FixedSentEncoder(nn.Module):
                 outputs = encoder(batch_input_ids, attention_mask=attention_mask)
 
             last_hidden = outputs[0]  # (batch, seq_len, hidden_size)
-            assert last_hidden.size() == (mini_batch_size, max_len, self.hidden_size)
+            assert last_hidden.size() == (mini_batch_size, max_len, self.embed_size)
+
+            encoder_out, _ = self.LSTM(last_hidden)
+            encoder_out = self.Dropout(encoder_out)
 
             for i in range(last_hidden.size(0)):
-                embedding = last_hidden[i]  # (max_length, hidden_size)
+                embedding = encoder_out[i]  # (max_length, hidden_size)
                 pad_mask = attention_mask[i]
                 num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
                 token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
@@ -624,13 +633,11 @@ class FixedSentEncoder(nn.Module):
                 sent_embed.append(mean_embed)
 
         sent_embed = torch.stack(sent_embed, dim=0)
-        assert sent_embed.size() == (batch_size * num_cands, self.hidden_size)
+        assert sent_embed.size() == (batch_size * num_cands, 2 * self.hidden_size)
         sent_embed = self.Dropout(sent_embed)
+        sent_embed = sent_embed.view(batch_size, num_cands, 2 * self.hidden_size)
 
-        sent_embed = sent_embed.view(batch_size, num_cands, self.hidden_size)
-        bow_embed, _ = self.LSTM(sent_embed)  # (batch, max_sents, 2 * hidden_size)
-        bow_embed = self.Dropout(bow_embed)
-        return bow_embed
+        return sent_embed
 
 
     @staticmethod
