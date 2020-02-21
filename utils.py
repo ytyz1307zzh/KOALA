@@ -7,10 +7,14 @@
 
 import json
 import torch
-from typing import List
+from typing import List, Set, Dict
 import numpy as np
 from Constants import *
 import re
+from spacy.lang.en import STOP_WORDS
+STOP_WORDS = set(STOP_WORDS) - {'bottom', 'serious', 'top', 'alone', 'around', 'used', 'behind', 'side', 'mine', 'well'}
+from ConceptNet.Stemmer import PorterStemmer
+stemmer = PorterStemmer()
 
 max_num_candidates = 0
 max_num_tokens = 0
@@ -193,6 +197,56 @@ def bert_subword_map(origin_tokens: List[str], tokens: List[str]) -> List[int]:
             cur_token = ''
 
     return offset
+
+
+def remove_stopword(paragraph: str) -> Set[str]:
+    """
+    Acquire all content words from a paragraph.
+    """
+    paragraph = paragraph.lower().strip().split()
+    return {word for word in paragraph if word not in STOP_WORDS and word.isalpha()}
+
+
+def find_relevant_triple(gold_loc_seq: List[str], gold_state_seq: List[str], verb_dict: Dict, cpnet_triples: List[str]):
+
+    assert len(gold_state_seq) == len(gold_loc_seq) - 1
+    gold_loc_seq = gold_loc_seq[1:]
+    state_rel_labels, loc_rel_labels = [], []
+
+    for sent_idx in range(len(gold_state_seq)):
+        state_rel_list, loc_rel_list = [], []
+        location = gold_loc_seq[sent_idx]
+        state = gold_state_seq[sent_idx]
+
+        state_token_set = None
+        if state == 'C':
+            state_token_set = set(verb_dict['create'].keys())
+        elif state == 'M':
+            state_token_set = set(verb_dict['move'].keys())
+        elif state == 'D':
+            state_token_set = set(verb_dict['destroy'].keys())
+
+        loc_token_set = remove_stopword(location)
+        loc_token_set = set(map(stemmer.stem, loc_token_set))
+
+        for triple in cpnet_triples:
+            token_set = remove_stopword(triple)
+            token_set = set(map(stemmer.stem, token_set))
+
+            if state_token_set is not None and token_set.intersection(state_token_set):
+                state_rel_list.append(1)
+            else:
+                state_rel_list.append(0)
+
+            if token_set.intersection(loc_token_set):
+                loc_rel_list.append(1)
+            else:
+                loc_rel_list.append(0)
+
+        state_rel_labels.append(state_rel_list)
+        loc_rel_labels.append(loc_rel_list)
+
+    return state_rel_labels, loc_rel_labels
 
 
 def unpad(source: List[int], pad_value: int) -> List[int]:
