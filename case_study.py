@@ -27,7 +27,6 @@ parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of 
 parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
 parser.add_argument('-loc_loss', type=float, default=0.3, help="hyper-parameter to weight location loss and state_loss")
-parser.add_argument('-elmo_dir', type=str, default='elmo', help="directory that contains options and weight files for allennlp Elmo")
 
 parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")

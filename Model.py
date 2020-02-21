@@ -513,9 +513,8 @@ class GatedAttnUpdate(nn.Module):
         self.value_size = value_size
         self.input_size = input_size
 
-        attn_vec = torch.empty(query_size, value_size)
-        nn.init.xavier_normal_(attn_vec)
-        self.attn_vec = nn.Parameter(attn_vec, requires_grad=True)
+        self.query_attn_fc = Linear(query_size, 1, dropout=dropout)
+        self.values_attn_fc = Linear(value_size, 1, dropout=dropout)
 
         self.gate_fc = Linear(input_size + value_size, input_size, dropout=dropout)
         self.concat_fc = Linear(input_size + value_size, input_size, dropout=dropout)
@@ -541,9 +540,13 @@ class GatedAttnUpdate(nn.Module):
         assert ori_input.size(-1) == self.input_size
 
         # attention
-        attn_vec = self.attn_vec.unsqueeze(0).expand(batch_size, -1, -1)  # (batch, query_size, value_size)
-        # similarity score, (batch, max_sents, num_cands)
-        S = torch.bmm(torch.bmm(query, attn_vec), values.transpose(1, 2))
+        query_exp_shape = (query.size(0), query.size(1), values.size(1), query.size(2))
+        values_exp_shape = (query.size(0), query.size(1), values.size(1), values.size(2))
+        query_exp = query.unsqueeze(2).expand(query_exp_shape)
+        values_exp = values.unsqueeze(1).expand(values_exp_shape)
+        S = self.query_attn_fc(query_exp) + self.values_attn_fc(values_exp)
+        S = S.squeeze()
+        assert S.size() == (batch_size, max_sents, num_cands)
 
         if attn_mask is not None:
             attn_mask = attn_mask.unsqueeze(1)
