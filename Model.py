@@ -513,8 +513,11 @@ class GatedAttnUpdate(nn.Module):
         self.value_size = value_size
         self.input_size = input_size
 
-        self.query_attn_fc = Linear(query_size, 1, dropout=dropout)
-        self.values_attn_fc = Linear(value_size, 1, dropout=dropout)
+        assert query_size == value_size
+        attn_vec = torch.empty(3 * query_size)
+        lim = 1 / query_size
+        nn.init.uniform_(attn_vec, -math.sqrt(lim), math.sqrt(lim))
+        self.attn_vec = nn.Parameter(attn_vec, requires_grad=True)
 
         self.gate_fc = Linear(input_size + value_size, input_size, dropout=dropout)
         self.concat_fc = Linear(input_size + value_size, input_size, dropout=dropout)
@@ -542,11 +545,12 @@ class GatedAttnUpdate(nn.Module):
         # attention
         query_exp_shape = (query.size(0), query.size(1), values.size(1), query.size(2))
         values_exp_shape = (query.size(0), query.size(1), values.size(1), values.size(2))
-        query_exp = query.unsqueeze(2).expand(query_exp_shape)
-        values_exp = values.unsqueeze(1).expand(values_exp_shape)
-        S = self.query_attn_fc(query_exp) + self.values_attn_fc(values_exp)
-        S = S.squeeze()
-        assert S.size() == (batch_size, max_sents, num_cands)
+        Q = query.unsqueeze(2).expand(query_exp_shape)
+        V = values.unsqueeze(1).expand(values_exp_shape)
+        assert Q.size() == V.size()
+        QV = torch.mul(Q, V)
+        S = torch.cat([Q, V, QV], dim=-1)
+        S = torch.matmul(S, self.attn_vec)  # similarity score, (batch, max_sents, num_cands)
 
         if attn_mask is not None:
             attn_mask = attn_mask.unsqueeze(1)
