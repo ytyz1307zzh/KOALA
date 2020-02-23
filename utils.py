@@ -246,6 +246,9 @@ def find_relevant_triple(gold_loc_seq: List[str], gold_state_seq: List[str], ver
         state_rel_labels.append(state_rel_list)
         loc_rel_labels.append(loc_rel_list)
 
+    state_rel_labels = torch.tensor(state_rel_labels, dtype=torch.int)
+    loc_rel_labels = torch.tensor(loc_rel_labels, dtype=torch.int)
+
     return state_rel_labels, loc_rel_labels
 
 

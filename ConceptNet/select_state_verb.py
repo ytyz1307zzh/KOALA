@@ -16,14 +16,14 @@ stemmer = PorterStemmer()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-data_dir', default='../data', type=str, help='directory to the dataset')
-parser.add_argument('-output', default='./result/state_verb.json', help='output path')
-parser.add_argument('-keep_thres', default=5, help='the threshold of appearance frequency to keep the verb')
+parser.add_argument('-output', default='./result/state_verb_10.json', help='output path')
+parser.add_argument('-keep_thres', default=10, help='the threshold of appearance frequency to keep the verb')
 opt = parser.parse_args()
 
 create_verb = {}
 move_verb = {}
 destroy_verb = {}
-STOP_VERBS = {'is', 'was', 'are', 'were', 'am', 'be', 'being', 'been', '\'s'}
+STOP_VERBS = {'is', 'was', 'are', 'were', 'am', 'be', 'being', 'been', '\'s', 'have', 'has'}
 
 
 def count_stat(verb_dict: Dict[str, int]):

@@ -29,6 +29,7 @@ parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
 parser.add_argument('-loc_loss', type=float, default=0.3, help="hyper-parameter to weight location loss and state_loss")
 
 parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
+parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
 parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both'], default='both',
                     help='where to inject ConceptNet commonsense')
@@ -99,7 +100,6 @@ def get_output(metadata: Dict, pred_state_seq: List[int], pred_loc_seq: List[int
     entity_name = metadata['entity']
     loc_cand_list = metadata['loc_cand_list']
     total_sents = metadata['total_sents']
-    loc_cands = metadata['loc_cand_list']
 
     pred_state_seq = [idx2state[idx] for idx in pred_state_seq]
     gold_state_seq = [idx2state[idx] for idx in gold_state_seq if idx != PAD_STATE]
@@ -278,7 +278,8 @@ def test(test_set, model):
 
 
 if __name__ == "__main__":
-    test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet, tokenizer=plm_tokenizer, is_test=True)
+    test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet, verbdict_path=opt.state_verb,
+                              tokenizer=plm_tokenizer, is_test=True)
 
     print('[INFO] Start loading trained model...')
     restore_start_time = time.time()
