@@ -105,6 +105,21 @@ def find_loc_candidate(paragraph: flair.data.Sentence) -> Set[str]:
             and (pos_list[i-1][0] == 'and' or pos_list[i-1][0] == 'or') \
                 and pos_list[i-2][1] == 'NOUN':
             loc_list.append(pos_list[i-2][0] + ' ' + pos_list[i-1][0] + ' ' + pos_list[i][0])
+
+    # noun + of + noun phrase
+    for i in range(2, len(pos_list)):
+        if pos_list[i][1] == 'NOUN' \
+            and pos_list[i-1][0] == 'of' \
+                and pos_list[i-2][1] == 'NOUN':
+            loc_list.append(pos_list[i-2][0] + ' ' + pos_list[i-1][0] + ' ' + pos_list[i][0])
+
+    # noun + of + a/an/the + noun phrase
+    for i in range(3, len(pos_list)):
+        if pos_list[i][1] == 'NOUN' \
+            and pos_list[i-1][1] == 'DET' \
+                and pos_list[i-2][0] == 'of' \
+                    and pos_list[i-3][1] == 'NOUN':
+            loc_list.append(pos_list[i-3][0] + ' ' + pos_list[i-2][0] + ' ' + pos_list[i-1][0] + ' ' + pos_list[i][0])
     
     # lemmatization
     for i in range(len(loc_list)):
