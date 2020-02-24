@@ -60,7 +60,7 @@ def get_output(metadata: Dict, pred_state_seq: List[int], pred_loc_seq: List[int
     pred_state_seq = [idx2state[idx] for idx in pred_state_seq]  # pred_state_seq outside the function won't be changed
     pred_loc_seq = [loc_cand_list[idx] for idx in pred_loc_seq]  # pred_loc_seq outside the function won't be changed
 
-    pred_loc_seq = predict_consistent_loc(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq)
+    pred_state_seq, pred_loc_seq = predict_consistent_loc(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq)
     prediction = format_final_prediction(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq)
     assert len(prediction) == total_sents
 
@@ -120,7 +120,7 @@ def hard_constraint(state: str, loc_before: str, loc_after: str) -> (str, str, s
 
 
 # TODO: if state1 == 'E', then state0 should be '?' or state0 should be the same with state1?
-def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str]) -> List[str]:
+def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str]) -> (List[str], List[str]):
     """
     1. Only keep the location predictions at state "C" or "M"
     2. For "O_C", "O_D", and "D", location should be "-"
@@ -131,6 +131,7 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str]) -
 
     assert len(pred_state_seq) == len(pred_loc_seq)
     num_sents = len(pred_state_seq)
+    consist_state_seq = []
     consist_loc_seq = []
 
     for sent_i in range(num_sents):
@@ -155,10 +156,11 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str]) -
         elif state in ['C', 'M']:
             cur_location = location
 
+        consist_state_seq.append(state)
         consist_loc_seq.append(cur_location)
 
-    assert len(consist_loc_seq) == num_sents + 1
-    return consist_loc_seq
+    assert len(consist_loc_seq) - 1 == len(consist_state_seq) == num_sents
+    return consist_state_seq, consist_loc_seq
 
 
 def predict_loc0(state1: str) -> str:
