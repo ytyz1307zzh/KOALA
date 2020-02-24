@@ -142,6 +142,12 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str]) -
             location_0 = predict_loc0(state1 = state)
             consist_loc_seq.append(location_0)
 
+        if sent_i > 0 and state == 'O_C' and pred_state_seq[sent_i-1] != 'O_C':
+            raise ValueError('the state before O_C is not O_C')
+
+        if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state in ['E', 'M'] :
+            state = 'C'
+
         if state in ['O_C', 'O_D', 'D']:
             cur_location = '-'
         elif state == 'E':
