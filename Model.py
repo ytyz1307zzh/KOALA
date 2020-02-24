@@ -68,19 +68,24 @@ class NCETModel(nn.Module):
         # location prediction modules
         self.LocationPredictor = LocationPredictor(opt)
         self.CrossEntropy = nn.CrossEntropyLoss(ignore_index = PAD_LOC, reduction = 'mean')
+        self.BinaryCrossEntropy = nn.BCELoss(reduction='mean')
 
         self.is_test = is_test
         
 
     def forward(self, token_ids: torch.Tensor, entity_mask: torch.IntTensor, verb_mask: torch.IntTensor,
                 loc_mask: torch.IntTensor, gold_loc_seq: torch.IntTensor, gold_state_seq: torch.IntTensor,
-                num_cands: torch.IntTensor, sentence_mask: torch.IntTensor, cpnet_triples: List, print_hidden):
+                num_cands: torch.IntTensor, sentence_mask: torch.IntTensor, cpnet_triples: List,
+                state_rel_labels: torch.IntTensor, loc_rel_labels: torch.IntTensor, print_hidden):
         """
         Args:
             token_ids: size (batch, max_tokens)
+            *_mask: size (batch, max_sents, max_tokens)
             gold_loc_seq: size (batch, max_sents)
             gold_state_seq: size (batch, max_sents)
-            num_cands: size(batch,)
+            state_rel_labels: size (batch, max_sents, max_cpnet)
+            loc_rel_labels: size (batch, max_sents, max_cpnet)
+            num_cands: size (batch,)
         """
         assert entity_mask.size(-2) == verb_mask.size(-2) == loc_mask.size(-2) == gold_state_seq.size(-1) == gold_loc_seq.size(-1)
         assert entity_mask.size(-1) == verb_mask.size(-1) == loc_mask.size(-1) == token_ids.size(-1)
@@ -101,9 +106,9 @@ class NCETModel(nn.Module):
 
         # state change prediction
         # size (batch, max_sents, NUM_STATES)
-        tag_logits = self.StateTracker(encoder_out = token_rep, entity_mask = entity_mask, verb_mask = verb_mask,
-                                       sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
-                                       cpnet_rep = cpnet_rep)
+        tag_logits, state_attn_probs = self.StateTracker(encoder_out = token_rep, entity_mask = entity_mask,
+                                                         verb_mask = verb_mask, sentence_mask = sentence_mask,
+                                                         cpnet_triples = cpnet_triples, cpnet_rep = cpnet_rep)
         tag_mask = (gold_state_seq != PAD_STATE) # mask the padded part so they won't count in loss
         log_likelihood = self.CRFLayer(emissions = tag_logits, tags = gold_state_seq.long(), mask = tag_mask, reduction = 'token_mean')
 
@@ -115,9 +120,9 @@ class NCETModel(nn.Module):
 
         # location prediction
         # size (batch, max_cands, max_sents)
-        loc_logits = self.LocationPredictor(encoder_out = token_rep, entity_mask = entity_mask, loc_mask = loc_mask,
-                                            sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
-                                            cpnet_rep = cpnet_rep)
+        loc_logits, loc_attn_probs = self.LocationPredictor(encoder_out = token_rep, entity_mask = entity_mask,
+                                                            loc_mask = loc_mask, sentence_mask = sentence_mask,
+                                                            cpnet_triples = cpnet_triples, cpnet_rep = cpnet_rep)
         loc_logits = loc_logits.transpose(-1, -2)  # size (batch, max_sents, max_cands)
         masked_loc_logits = self.mask_loc_logits(loc_logits = loc_logits, num_cands = num_cands)  # (batch, max_sents, max_cands)
         masked_gold_loc_seq = self.mask_undefined_loc(gold_loc_seq = gold_loc_seq, mask_value = PAD_LOC)  # (batch, max_sents)
@@ -125,13 +130,43 @@ class NCETModel(nn.Module):
                                      target = masked_gold_loc_seq.view(batch_size * max_sents).long())
         correct_loc_pred, total_loc_pred = compute_loc_accuracy(logits = masked_loc_logits, gold = masked_gold_loc_seq,
                                                                 pad_value = PAD_LOC)
-        # assert total_loc_pred > 0
+
+        attn_loss, total_attn_pred = self.get_attn_loss(state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels)
 
         if self.is_test:  # inference
             pred_loc_seq = get_pred_loc(loc_logits = masked_loc_logits, gold_loc_seq = gold_loc_seq)
             return pred_state_seq, pred_loc_seq, correct_state_pred, total_state_pred, correct_loc_pred, total_loc_pred
 
-        return state_loss, loc_loss, correct_state_pred, total_state_pred, correct_loc_pred, total_loc_pred
+        return state_loss, loc_loss, attn_loss, correct_state_pred, total_state_pred, \
+               correct_loc_pred, total_loc_pred, total_attn_pred
+
+
+    def get_attn_loss(self, state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels):
+        """
+        Compute attention loss.
+        All inputs: (batch, max_sents, max_cpnet)
+        """
+        pos_attn_probs = None
+        if state_attn_probs is not None:
+            state_pos_attn_probs = state_attn_probs.masked_select(mask=state_rel_labels.to(torch.bool))  # 1-D tensor
+        if loc_attn_probs is not None:
+            loc_pos_attn_probs = loc_attn_probs.masked_select(mask=loc_rel_labels.to(torch.bool))  # 1-D tensor
+
+        if state_attn_probs is not None and loc_attn_probs is not None:
+            pos_attn_probs = torch.cat([state_pos_attn_probs, loc_pos_attn_probs], dim=0)
+        elif state_attn_probs is not None:
+            pos_attn_probs = state_pos_attn_probs
+        elif loc_attn_probs is not None:
+            pos_attn_probs = loc_pos_attn_probs
+
+        attn_loss = None
+        total_attn_pred = None
+        if pos_attn_probs is not None:
+            gold_labels = torch.ones_like(pos_attn_probs)
+            attn_loss = self.BinaryCrossEntropy(input=pos_attn_probs, target=gold_labels)
+            total_attn_pred = gold_labels.size(0)
+
+        return attn_loss, total_attn_pred
 
 
     def mask_loc_logits(self, loc_logits, num_cands: torch.IntTensor):
@@ -231,15 +266,16 @@ class StateTracker(nn.Module):
         # (batch, max_sents, 4 * hidden_size)
         decoder_in = self.get_masked_input(encoder_out, entity_mask, verb_mask, batch_size = batch_size)
         # (batch, max_sents, 4 * hidden_size)
+        attn_probs = None
         if self.cpnet_inject in ['state', 'both']:
-            decoder_in = self.CpnetMemory(encoder_out, decoder_in, entity_mask,
+            decoder_in, attn_probs = self.CpnetMemory(encoder_out, decoder_in, entity_mask,
                                           sentence_mask, cpnet_triples, cpnet_rep)
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         decoder_out = self.Dropout(decoder_out)
         tag_logits = self.Hidden2Tag(decoder_out)  # (batch, max_sents, num_tags)
         assert tag_logits.size() == (batch_size, max_sents, NUM_STATES)
 
-        return tag_logits
+        return tag_logits, attn_probs
     
 
     def get_masked_input(self, encoder_out, entity_mask, verb_mask, batch_size: int):
@@ -321,8 +357,9 @@ class LocationPredictor(nn.Module):
 
         decoder_in = self.get_masked_input(encoder_out, entity_mask, loc_mask, batch_size = batch_size)
         decoder_in = decoder_in.view(batch_size * max_cands, max_sents, 4 * self.hidden_size)
+        attn_probs = None
         if self.cpnet_inject in ['location', 'both']:
-            decoder_in = self.CpnetMemory(encoder_out=NCETModel.expand_dim_3d(encoder_out, max_cands),
+            decoder_in, attn_probs = self.CpnetMemory(encoder_out=NCETModel.expand_dim_3d(encoder_out, max_cands),
                                           decoder_in=decoder_in,
                                           entity_mask=NCETModel.expand_dim_3d(entity_mask, max_cands),
                                           sentence_mask=NCETModel.expand_dim_3d(sentence_mask, max_cands),
@@ -336,7 +373,7 @@ class LocationPredictor(nn.Module):
         decoder_out = self.Dropout(decoder_out)
         loc_logits = self.Hidden2Score(decoder_out).squeeze(dim = -1)  # (batch, max_cands, max_sents)
 
-        return loc_logits
+        return loc_logits, attn_probs
 
     def get_masked_input(self, encoder_out, entity_mask, loc_mask, batch_size: int):
         """
@@ -457,7 +494,7 @@ class CpnetMemory(nn.Module):
             max_cands = batch_size // cpnet_rep.size(0)
             cpnet_rep = NCETModel.expand_dim_3d(cpnet_rep, loc_cands=max_cands)
             attn_mask = NCETModel.expand_dim_2d(attn_mask, loc_cands=max_cands)
-        update_in = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask,
+        update_in, attn_probs = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask,
                                     ori_batch_size = ori_batch_size)
 
         mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
@@ -465,7 +502,7 @@ class CpnetMemory(nn.Module):
             mask_vec += torch.sum(loc_mask, dim=-1, keepdim=True)
         update_in = update_in.masked_fill(mask_vec==0, value=0)
 
-        return update_in
+        return update_in, attn_probs
 
 
     def get_masked_mean(self, source, mask, batch_size: int):
@@ -558,6 +595,13 @@ class GatedAttnUpdate(nn.Module):
         C = torch.bmm(probs, values).squeeze()  # weighted sum, (batch, max_sents, value_size)
         assert C.size() == (batch_size, max_sents, self.value_size)
 
+        # select attention weights for attention loss
+        # for location prediction, only select one case since they are the same
+        if ori_batch_size != batch_size:
+            select_probs = probs.view(ori_batch_size, -1, max_sents, num_cands)[:, 0, :, :]
+        else:
+            select_probs = probs
+
         # gate
         concat_vec = torch.cat([ori_input, C], dim=-1)
         gate_vec = torch.sigmoid(self.gate_fc(concat_vec))
@@ -565,7 +609,7 @@ class GatedAttnUpdate(nn.Module):
         final_input = torch.mul(gate_vec, cand_input) + torch.mul(1 - gate_vec, ori_input)
         assert final_input.size() == (batch_size, max_sents, self.input_size)
 
-        return final_input
+        return final_input, select_probs
 
 
 class FixedSentEncoder(nn.Module):

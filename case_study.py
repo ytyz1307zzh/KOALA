@@ -224,6 +224,8 @@ def test(test_set, model):
             gold_loc_seq = batch['gold_loc_seq']
             gold_state_seq = batch['gold_state_seq']
             cpnet_triples = batch['cpnet']
+            state_rel_labels = batch['state_rel_labels']
+            loc_rel_labels = batch['loc_rel_labels']
             metadata = batch['metadata']
             cpnet_cands = len(cpnet_triples[0])
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
@@ -236,12 +238,14 @@ def test(test_set, model):
                 loc_mask = loc_mask.cuda()
                 gold_loc_seq = gold_loc_seq.cuda()
                 gold_state_seq = gold_state_seq.cuda()
+                state_rel_labels = state_rel_labels.cuda()
+                loc_rel_labels = loc_rel_labels.cuda()
                 num_cands = num_cands.cuda()
 
             test_result = model(token_ids=token_ids, entity_mask=entity_mask, verb_mask=verb_mask,
                                 loc_mask=loc_mask, gold_loc_seq=gold_loc_seq, gold_state_seq=gold_state_seq,
                                 num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples,
-                                print_hidden=False)
+                                state_rel_labels=state_rel_labels, loc_rel_labels=loc_rel_labels, print_hidden=False)
 
             pred_state_seq, pred_loc_seq, test_state_correct, test_state_pred,\
                 test_loc_correct, test_loc_pred = test_result

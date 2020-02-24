@@ -37,7 +37,8 @@ parser.add_argument('-plm_model_name', type=str, default='bert-base-uncased', he
 parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of lstm")
 parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
-parser.add_argument('-loc_loss', type=float, default=0.3, help="hyper-parameter to weight location loss and state_loss")
+parser.add_argument('-loc_loss', type=float, default=0.3, help="hyper-parameter to weight location loss")
+parser.add_argument('-attn_loss', type=float, default=0.5, help="hyper-parameter to weight attention loss")
 parser.add_argument('-max_grad_norm', default=1.0, type=float, help="Max gradient norm")
 parser.add_argument('-grad_accum_step', default=1, type=int, help='gradient accumulation steps')
 
@@ -76,6 +77,9 @@ try:
 except KeyError:  # did not specify device from cmd
     opt.n_gpu = 1
 opt.batch_size = opt.per_gpu_batch_size * opt.n_gpu
+
+if opt.cpnet_inject == 'none':
+    opt.attn_loss = 0
 
 plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
 plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
@@ -166,6 +170,7 @@ def train():
         report_state_loss, report_loc_loss = 0, 0
         report_state_correct, report_state_pred = 0, 0
         report_loc_correct, report_loc_pred = 0, 0
+        report_attn_loss, report_attn_pred = 0, 0
         batch_cnt = 0
 
         if train_instances % opt.batch_size == 0:
@@ -191,6 +196,8 @@ def train():
             gold_loc_seq = batch['gold_loc_seq']
             gold_state_seq = batch['gold_state_seq']
             cpnet_triples = batch['cpnet']
+            state_rel_labels = batch['state_rel_labels']
+            loc_rel_labels = batch['loc_rel_labels']
             metadata = batch['metadata']
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
@@ -202,6 +209,8 @@ def train():
                 loc_mask = loc_mask.cuda()
                 gold_loc_seq = gold_loc_seq.cuda()
                 gold_state_seq = gold_state_seq.cuda()
+                state_rel_labels = state_rel_labels.cuda()
+                loc_rel_labels = loc_rel_labels.cuda()
                 num_cands = num_cands.cuda()
 
             if batch_cnt == 0 or batch_cnt in report_batch:
@@ -212,16 +221,22 @@ def train():
             train_result = model(token_ids=token_ids, entity_mask = entity_mask, verb_mask = verb_mask,
                                  loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
                                  num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
+                                 state_rel_labels = state_rel_labels, loc_rel_labels = loc_rel_labels,
                                  print_hidden = print_hidden)
 
-            train_state_loss, train_loc_loss, train_state_correct, train_state_pred,\
-                train_loc_correct, train_loc_pred = train_result
+            train_state_loss, train_loc_loss, train_attn_loss, train_state_correct,\
+            train_state_pred, train_loc_correct, train_loc_pred, train_attn_pred = train_result
 
             if opt.n_gpu > 1:
                 train_state_loss = train_state_loss.mean()
                 train_loc_loss = train_loc_loss.mean()
+                if train_attn_loss is not None:
+                    train_attn_loss = train_attn_loss.mean()
 
             train_loss = train_state_loss + opt.loc_loss * train_loc_loss
+            if train_attn_loss is not None:
+                train_loss += opt.attn_loss * train_attn_loss
+
             if opt.grad_accum_step > 1:
                 train_loss = train_loss / opt.grad_accum_step
             train_loss.backward()
@@ -232,6 +247,9 @@ def train():
             report_state_pred += train_state_pred
             report_loc_correct += train_loc_correct
             report_loc_pred += train_loc_pred
+            if train_attn_loss is not None:
+                report_attn_loss += train_attn_loss.item() * train_attn_pred
+                report_attn_pred += train_attn_pred
             batch_cnt += 1
 
             if batch_cnt % opt.grad_accum_step == 0:
@@ -245,6 +263,13 @@ def train():
                     state_loss = report_state_loss / report_state_pred  # average over all elements
                     loc_loss = report_loc_loss / report_loc_pred
                     total_loss = state_loss + opt.loc_loss * loc_loss
+
+                    if train_attn_loss is not None:
+                        attn_loss = report_attn_loss / report_attn_pred
+                        total_loss += opt.attn_loss * attn_loss
+                    else:
+                        attn_loss = 0
+
                     state_accuracy = report_state_correct / report_state_pred
                     loc_accuracy = report_loc_correct / report_loc_pred
                     total_accuracy = (report_state_correct + report_loc_correct) / (report_state_pred + report_loc_pred)
@@ -252,7 +277,7 @@ def train():
                     output('*' * 50)
                     output(f'{batch_cnt}/{total_batches}, Epoch {epoch_i+1}:\n'
                            f'Loss: {total_loss:.3f}, State Loss: {state_loss:.3f}, '
-                           f'Location Loss: {loc_loss:.3f}\n'
+                           f'Location Loss: {loc_loss:.3f}, Attention Loss: {attn_loss:.3f}\n'
                            f'Total Accuracy: {total_accuracy*100:.3f}%, '
                            f'State Prediction Accuracy: {state_accuracy*100:.3f}%, '
                            f'Location Accuracy: {loc_accuracy*100:.3f}% \n'
@@ -285,6 +310,7 @@ def train():
                     report_state_loss, report_loc_loss = 0, 0
                     report_state_correct, report_state_pred = 0, 0
                     report_loc_correct, report_loc_pred = 0, 0
+                    report_attn_loss, report_attn_pred = 0, 0
                     start_time = time.time()
 
         epoch_i += 1
@@ -305,6 +331,7 @@ def evaluate(dev_set, model):
     report_state_loss, report_loc_loss = 0, 0
     report_state_correct, report_state_pred = 0, 0
     report_loc_correct, report_loc_pred = 0, 0
+    report_attn_loss, report_attn_pred = 0, 0
     batch_cnt = 0
 
     with torch.no_grad():
@@ -320,6 +347,8 @@ def evaluate(dev_set, model):
             gold_loc_seq = batch['gold_loc_seq']
             gold_state_seq = batch['gold_state_seq']
             cpnet_triples = batch['cpnet']
+            state_rel_labels = batch['state_rel_labels']
+            loc_rel_labels = batch['loc_rel_labels']
             metadata = batch['metadata']
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
@@ -331,6 +360,8 @@ def evaluate(dev_set, model):
                 loc_mask = loc_mask.cuda()
                 gold_loc_seq = gold_loc_seq.cuda()
                 gold_state_seq = gold_state_seq.cuda()
+                state_rel_labels = state_rel_labels.cuda()
+                loc_rel_labels = loc_rel_labels.cuda()
                 num_cands = num_cands.cuda()
 
             if batch_cnt == 0:
@@ -341,14 +372,17 @@ def evaluate(dev_set, model):
             eval_result = model(token_ids = token_ids, entity_mask = entity_mask, verb_mask = verb_mask,
                                 loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
                                 num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
+                                state_rel_labels = state_rel_labels, loc_rel_labels = loc_rel_labels,
                                 print_hidden = print_hidden)
 
-            eval_state_loss, eval_loc_loss, eval_state_correct, eval_state_pred, \
-                eval_loc_correct, eval_loc_pred = eval_result
+            eval_state_loss, eval_loc_loss, eval_attn_loss, eval_state_correct,\
+            eval_state_pred, eval_loc_correct, eval_loc_pred, eval_attn_pred = eval_result
 
             if opt.n_gpu > 1:
                 eval_state_loss = eval_state_loss.mean()
                 eval_loc_loss = eval_loc_loss.mean()
+                if eval_attn_loss is not None:
+                    eval_attn_loss = eval_attn_loss.mean()
 
             report_state_loss += eval_state_loss.item() * eval_state_pred
             report_loc_loss += eval_loc_loss.item() * eval_loc_pred
@@ -356,19 +390,28 @@ def evaluate(dev_set, model):
             report_state_pred += eval_state_pred
             report_loc_correct += eval_loc_correct
             report_loc_pred += eval_loc_pred
+            if eval_attn_loss is not None:
+                report_attn_loss += eval_attn_loss.item() * eval_attn_pred
+                report_attn_pred += eval_attn_pred
 
             batch_cnt += 1
 
     state_loss = report_state_loss / report_state_pred  # average over all elements
     loc_loss = report_loc_loss / report_loc_pred
     total_loss = state_loss + opt.loc_loss * loc_loss
+    if eval_attn_loss is not None:
+        attn_loss = report_attn_loss / report_attn_pred
+        total_loss += opt.attn_loss * attn_loss
+    else:
+        attn_loss = 0
+
     total_accuracy = (report_state_correct + report_loc_correct) / (report_state_pred + report_loc_pred)
     state_accuracy = report_state_correct / report_state_pred
     loc_accuracy = report_loc_correct / report_loc_pred
 
     output(f'\tEvaluation:\n'
            f'\tLoss: {total_loss:.3f}, State Loss: {state_loss:.3f}, '
-           f'Location Loss: {loc_loss:.3f}\n'
+           f'Location Loss: {loc_loss:.3f}, Attention Loss: {attn_loss:.3f}\n'
            f'\tTotal Accuracy: {total_accuracy * 100:.3f}%, '
            f'State Prediction Accuracy: {state_accuracy * 100:.3f}%, '
            f'Location Accuracy: {loc_accuracy * 100:.3f}% \n'
@@ -402,6 +445,8 @@ def test(test_set, model):
             gold_loc_seq = batch['gold_loc_seq']
             gold_state_seq = batch['gold_state_seq']
             cpnet_triples = batch['cpnet']
+            state_rel_labels = batch['state_rel_labels']
+            loc_rel_labels = batch['loc_rel_labels']
             metadata = batch['metadata']
             num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
 
@@ -413,6 +458,8 @@ def test(test_set, model):
                 loc_mask = loc_mask.cuda()
                 gold_loc_seq = gold_loc_seq.cuda()
                 gold_state_seq = gold_state_seq.cuda()
+                state_rel_labels = state_rel_labels.cuda()
+                loc_rel_labels = loc_rel_labels.cuda()
                 num_cands = num_cands.cuda()
 
             if batch_cnt == 0:
@@ -423,7 +470,7 @@ def test(test_set, model):
             test_result = model(token_ids=token_ids, entity_mask=entity_mask, verb_mask=verb_mask,
                                 loc_mask=loc_mask, gold_loc_seq=gold_loc_seq, gold_state_seq=gold_state_seq,
                                 num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples,
-                                print_hidden=print_hidden)
+                                state_rel_labels=state_rel_labels, loc_rel_labels=loc_rel_labels, print_hidden=print_hidden)
 
             pred_state_seq, pred_loc_seq, test_state_correct, test_state_pred,\
                 test_loc_correct, test_loc_pred = test_result
