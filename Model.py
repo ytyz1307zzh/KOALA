@@ -592,7 +592,7 @@ class GatedAttnUpdate(nn.Module):
             self.attn_log.extend(probs.tolist())
         is_nan = torch.isnan(probs)
         probs = probs.masked_fill(is_nan, value=0)  # if no valid triple exist, the system will output nan
-        C = torch.bmm(probs, values).squeeze()  # weighted sum, (batch, max_sents, value_size)
+        C = torch.bmm(probs, values).squeeze(dim=-1)  # weighted sum, (batch, max_sents, value_size)
         assert C.size() == (batch_size, max_sents, self.value_size)
 
         # select attention weights for attention loss
@@ -709,3 +709,17 @@ class Linear(nn.Module):
 
     def forward(self, x):
         return self.dropout(self.linear(x))
+
+
+class Bilinear(nn.Module):
+    """
+    Simple Bilinear layer with xavier init and dropout
+    """
+    def __init__(self, in_1: int, in_2: int, d_out: int, dropout: float, bias: bool = True):
+        super(Bilinear, self).__init__()
+        self.bilinear = nn.Bilinear(in1_features=in_1, in2_features=in_2, out_features=d_out, bias=bias)
+        self.dropout = nn.Dropout(p=dropout)
+        nn.init.xavier_normal_(self.bilinear.weight)
+
+    def forward(self, x1, x2):
+        return self.dropout(self.bilinear(x1, x2))
