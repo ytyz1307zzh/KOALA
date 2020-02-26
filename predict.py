@@ -60,7 +60,8 @@ def get_output(metadata: Dict, pred_state_seq: List[int], pred_loc_seq: List[int
     pred_state_seq = [idx2state[idx] for idx in pred_state_seq]  # pred_state_seq outside the function won't be changed
     pred_loc_seq = [loc_cand_list[idx] for idx in pred_loc_seq]  # pred_loc_seq outside the function won't be changed
 
-    pred_state_seq, pred_loc_seq = predict_consistent_loc(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq)
+    pred_state_seq, pred_loc_seq = predict_consistent_loc(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq,
+                                                          para_id = para_id, entity = entity_name)
     prediction = format_final_prediction(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq)
     assert len(prediction) == total_sents
 
@@ -120,7 +121,8 @@ def hard_constraint(state: str, loc_before: str, loc_after: str) -> (str, str, s
 
 
 # TODO: if state1 == 'E', then state0 should be '?' or state0 should be the same with state1?
-def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str]) -> (List[str], List[str]):
+def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
+                           para_id: int, entity: str) -> (List[str], List[str]):
     """
     1. Only keep the location predictions at state "C" or "M"
     2. For "O_C", "O_D", and "D", location should be "-"
@@ -143,8 +145,20 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str]) -
             location_0 = predict_loc0(state1 = state)
             consist_loc_seq.append(location_0)
 
-        if sent_i > 0 and state == 'O_C' and pred_state_seq[sent_i-1] != 'O_C':
-            raise ValueError('the state before O_C is not O_C')
+        if sent_i < num_sents-1 and pred_state_seq[sent_i+1] == 'O_C' and state != 'O_C':
+            temp_idx = sent_i + 1
+            while pred_state_seq[temp_idx] == 'O_C':
+                temp_idx += 1
+            # pred_state_seq[temp_idx]: first state after O_C
+            # state: last state before O_C
+            print(para_id)
+            print(entity)
+            print(pred_state_seq)
+            if pred_state_seq[temp_idx] == 'C':
+                state = 'O_C'
+            else:
+                for idx in range(sent_i+1, temp_idx):
+                    pred_state_seq[idx] = 'E'
 
         if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state in ['E', 'M'] :
             state = 'C'

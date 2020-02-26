@@ -59,7 +59,8 @@ def get_output(metadata: Dict, pred_state_seq: List[int], pred_loc_seq: List[int
     pred_loc_seq = [loc_cand_list[idx] for idx in pred_loc_seq]
     gold_loc_seq = metadata['raw_gold_loc']  # gold locations in string form
 
-    pred_state_seq, pred_loc_seq = predict_consistent_loc(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq)
+    pred_state_seq, pred_loc_seq = predict_consistent_loc(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq,
+                                                          para_id = para_id, entity = entity_name)
     assert len(pred_state_seq) == len(gold_state_seq) == len(pred_loc_seq) - 1 == len(gold_loc_seq) - 1 == total_sents
 
     prediction = []
