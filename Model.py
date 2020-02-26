@@ -246,8 +246,8 @@ class StateTracker(nn.Module):
         self.Decoder = nn.LSTM(input_size = 4 * opt.hidden_size, hidden_size = opt.hidden_size,
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
-        self.Hidden2Tag = Linear(d_in = 2 * opt.hidden_size, d_out = NUM_STATES, dropout = 0)
-        self.CpnetMemory = CpnetMemory(opt, query_size = 2 * opt.hidden_size, input_size = 4 * opt.hidden_size)
+        self.Hidden2Tag = Linear(d_in = 4 * opt.hidden_size, d_out = NUM_STATES, dropout = 0)
+        self.CpnetMemory = CpnetMemory(opt, query_size = 2 * opt.hidden_size, input_size = 2 * opt.hidden_size)
         self.cpnet_inject = opt.cpnet_inject
 
 
@@ -267,11 +267,11 @@ class StateTracker(nn.Module):
         decoder_in = self.get_masked_input(encoder_out, entity_mask, verb_mask, batch_size = batch_size)
         # (batch, max_sents, 4 * hidden_size)
         attn_probs = None
-        if self.cpnet_inject in ['state', 'both']:
-            decoder_in, attn_probs = self.CpnetMemory(encoder_out, decoder_in, entity_mask,
-                                          sentence_mask, cpnet_triples, cpnet_rep)
         decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
         decoder_out = self.Dropout(decoder_out)
+        if self.cpnet_inject in ['state', 'both']:
+            decoder_out, attn_probs = self.CpnetMemory(encoder_out, decoder_out, entity_mask,
+                                          sentence_mask, cpnet_triples, cpnet_rep)  # (batch, max_sents, 4*hidden_size)
         tag_logits = self.Hidden2Tag(decoder_out)  # (batch, max_sents, num_tags)
         assert tag_logits.size() == (batch_size, max_sents, NUM_STATES)
 
@@ -337,8 +337,8 @@ class LocationPredictor(nn.Module):
         self.Decoder = nn.LSTM(input_size = 4 * opt.hidden_size, hidden_size = opt.hidden_size,
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
-        self.Hidden2Score = Linear(d_in = 2 * opt.hidden_size, d_out = 1, dropout = 0)
-        self.CpnetMemory = CpnetMemory(opt, query_size=2 * opt.hidden_size, input_size=4 * opt.hidden_size)
+        self.Hidden2Score = Linear(d_in = 4 * opt.hidden_size, d_out = 1, dropout = 0)
+        self.CpnetMemory = CpnetMemory(opt, query_size=2 * opt.hidden_size, input_size=2 * opt.hidden_size)
         self.cpnet_inject = opt.cpnet_inject
 
 
@@ -358,19 +358,19 @@ class LocationPredictor(nn.Module):
         decoder_in = self.get_masked_input(encoder_out, entity_mask, loc_mask, batch_size = batch_size)
         decoder_in = decoder_in.view(batch_size * max_cands, max_sents, 4 * self.hidden_size)
         attn_probs = None
+        decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
+        assert decoder_out.size() == (batch_size * max_cands, max_sents, 2 * self.hidden_size)
+
+        decoder_out = self.Dropout(decoder_out)
         if self.cpnet_inject in ['location', 'both']:
-            decoder_in, attn_probs = self.CpnetMemory(encoder_out=NCETModel.expand_dim_3d(encoder_out, max_cands),
-                                          decoder_in=decoder_in,
+            decoder_out, attn_probs = self.CpnetMemory(encoder_out=NCETModel.expand_dim_3d(encoder_out, max_cands),
+                                          decoder_in=decoder_out,
                                           entity_mask=NCETModel.expand_dim_3d(entity_mask, max_cands),
                                           sentence_mask=NCETModel.expand_dim_3d(sentence_mask, max_cands),
                                           cpnet_triples=cpnet_triples,
                                           cpnet_rep=cpnet_rep,
                                           loc_mask = loc_mask.view(batch_size*max_cands, max_sents, -1))
-        decoder_out, _ = self.Decoder(decoder_in)  # (batch, max_sents, 2 * hidden_size), forward & backward concatenated
-        assert decoder_out.size() == (batch_size * max_cands, max_sents, 2 * self.hidden_size)
-
-        decoder_out = decoder_out.view(batch_size, max_cands, max_sents, 2 * self.hidden_size)
-        decoder_out = self.Dropout(decoder_out)
+        decoder_out = decoder_out.view(batch_size, max_cands, max_sents, 4 * self.hidden_size)
         loc_logits = self.Hidden2Score(decoder_out).squeeze(dim = -1)  # (batch, max_cands, max_sents)
 
         return loc_logits, attn_probs
@@ -483,8 +483,8 @@ class CpnetMemory(nn.Module):
 
         # use the embedding of the current sentence as the attention query
         # (batch, max_sents, 2 * hidden_size)
-        query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
-        # query = decoder_in
+        # query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
+        query = decoder_in
         attn_mask = self.get_attn_mask(cpnet_triples)
         if self.cuda:
             attn_mask = attn_mask.cuda()
@@ -497,10 +497,10 @@ class CpnetMemory(nn.Module):
         update_in, attn_probs = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask,
                                     ori_batch_size = ori_batch_size)
 
-        mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
-        if loc_mask is not None:
-            mask_vec += torch.sum(loc_mask, dim=-1, keepdim=True)
-        update_in = update_in.masked_fill(mask_vec==0, value=0)
+        # mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
+        # if loc_mask is not None:
+        #     mask_vec += torch.sum(loc_mask, dim=-1, keepdim=True)
+        # update_in = update_in.masked_fill(mask_vec==0, value=0)
 
         return update_in, attn_probs
 
@@ -604,10 +604,11 @@ class GatedAttnUpdate(nn.Module):
 
         # gate
         concat_vec = torch.cat([ori_input, C], dim=-1)
-        gate_vec = torch.sigmoid(self.gate_fc(concat_vec))
-        cand_input = self.concat_fc(concat_vec)
-        final_input = torch.mul(gate_vec, cand_input) + torch.mul(1 - gate_vec, ori_input)
-        assert final_input.size() == (batch_size, max_sents, self.input_size)
+        final_input = self.Dropout(concat_vec)
+        # gate_vec = torch.sigmoid(self.gate_fc(concat_vec))
+        # cand_input = self.concat_fc(concat_vec)
+        # final_input = torch.mul(gate_vec, cand_input) + torch.mul(1 - gate_vec, ori_input)
+        assert final_input.size() == (batch_size, max_sents, 2*self.input_size)
 
         return final_input, select_probs
 
