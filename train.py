@@ -38,7 +38,7 @@ parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of 
 parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
 parser.add_argument('-loc_loss', type=float, default=0.3, help="hyper-parameter to weight location loss")
-parser.add_argument('-attn_loss', type=float, default=0.5, help="hyper-parameter to weight attention loss")
+parser.add_argument('-attn_loss', type=float, default=0.25, help="hyper-parameter to weight attention loss")
 parser.add_argument('-max_grad_norm', default=1.0, type=float, help="Max gradient norm")
 parser.add_argument('-grad_accum_step', default=1, type=int, help='gradient accumulation steps')
 

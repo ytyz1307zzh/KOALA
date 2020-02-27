@@ -141,20 +141,16 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
         state = pred_state_seq[sent_i]
         location = pred_loc_seq[sent_i]
 
-        if sent_i == 0:
-            location_0 = predict_loc0(state1 = state)
-            consist_loc_seq.append(location_0)
-
         if sent_i < num_sents-1 and pred_state_seq[sent_i+1] == 'O_C' and state != 'O_C':
-            temp_idx = sent_i + 1
-            while pred_state_seq[temp_idx] == 'O_C':
-                temp_idx += 1
-            # pred_state_seq[temp_idx]: first state after O_C
-            # state: last state before O_C
             print(para_id)
             print(entity)
             print(pred_state_seq)
-            if pred_state_seq[temp_idx] == 'C':
+            temp_idx = sent_i + 1
+            while temp_idx != num_sents and pred_state_seq[temp_idx] in ['O_C', 'O_D']:
+                temp_idx += 1
+            # pred_state_seq[temp_idx]: first state after O_C
+            # state: last state before O_C
+            if temp_idx != num_sents and pred_state_seq[temp_idx] == 'C':
                 state = 'O_C'
             else:
                 for idx in range(sent_i+1, temp_idx):
@@ -162,6 +158,23 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
 
         if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state in ['E', 'M'] :
             state = 'C'
+
+        if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state == 'D' :
+            print(para_id)
+            print(entity)
+            print(pred_state_seq)
+            for idx in range(0, sent_i):
+                if pred_state_seq[idx] != 'O_C':
+                    raise ValueError
+                else:
+                    consist_state_seq[idx] = 'E'
+                    consist_loc_seq[idx] = '?'
+            consist_loc_seq[sent_i] = '?'
+
+        # set location according to state
+        if sent_i == 0:
+            location_0 = predict_loc0(state1 = state)
+            consist_loc_seq.append(location_0)
 
         if state in ['O_C', 'O_D', 'D']:
             cur_location = '-'
