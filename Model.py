@@ -131,6 +131,7 @@ class NCETModel(nn.Module):
         correct_loc_pred, total_loc_pred = compute_loc_accuracy(logits = masked_loc_logits, gold = masked_gold_loc_seq,
                                                                 pad_value = PAD_LOC)
 
+        loc_attn_probs = self.get_gold_attn_probs(loc_attn_probs, gold_loc_seq)
         attn_loss, total_attn_pred = self.get_attn_loss(state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels)
 
         if self.is_test:  # inference
@@ -167,6 +168,21 @@ class NCETModel(nn.Module):
             total_attn_pred = gold_labels.size(0)
 
         return attn_loss, total_attn_pred
+
+
+    def get_gold_attn_probs(self, loc_attn_probs, gold_loc_seq):
+        batch_size = gold_loc_seq.size(0)
+        max_sents = gold_loc_seq.size(1)
+        max_cpnet = loc_attn_probs.size(-1)
+        pick_loc_seq = gold_loc_seq.masked_fill(mask=(gold_loc_seq < 0), value=0)
+        gold_attn_probs = []
+
+        for i in range(batch_size):
+            for j in range(max_sents):
+                gold_attn_probs.append(loc_attn_probs[i][pick_loc_seq[i][j]][j])
+
+        gold_attn_probs = torch.stack(gold_attn_probs, dim=0)
+        return gold_attn_probs.view(batch_size, max_sents, max_cpnet)
 
 
     def mask_loc_logits(self, loc_logits, num_cands: torch.IntTensor):
@@ -598,7 +614,7 @@ class GatedAttnUpdate(nn.Module):
         # select attention weights for attention loss
         # for location prediction, only select one case since they are the same
         if ori_batch_size != batch_size:
-            select_probs = probs.view(ori_batch_size, -1, max_sents, num_cands)[:, 0, :, :]
+            select_probs = probs.view(ori_batch_size, -1, max_sents, num_cands)
         else:
             select_probs = probs
 
