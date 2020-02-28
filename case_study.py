@@ -45,7 +45,7 @@ plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 
 
 def get_output(metadata: Dict, pred_state_seq: List[int], pred_loc_seq: List[int],
-               gold_state_seq: List[int], cpnet_triples: List[str]) -> Dict:
+               gold_state_seq: List[int], gold_loc_seq: List[int], cpnet_triples: List[str]) -> Dict:
     """
     Get the predicted output from generated sequences by the model.
     """
@@ -57,22 +57,23 @@ def get_output(metadata: Dict, pred_state_seq: List[int], pred_loc_seq: List[int
     pred_state_seq = [idx2state[idx] for idx in pred_state_seq]
     gold_state_seq = [idx2state[idx] for idx in gold_state_seq if idx != PAD_STATE]
     pred_loc_seq = [loc_cand_list[idx] for idx in pred_loc_seq]
-    gold_loc_seq = metadata['raw_gold_loc']  # gold locations in string form
+    raw_gold_loc = metadata['raw_gold_loc']  # gold locations in string form
 
     pred_state_seq, pred_loc_seq = predict_consistent_loc(pred_state_seq = pred_state_seq, pred_loc_seq = pred_loc_seq,
                                                           para_id = para_id, entity = entity_name)
-    assert len(pred_state_seq) == len(gold_state_seq) == len(pred_loc_seq) - 1 == len(gold_loc_seq) - 1 == total_sents
+    assert len(pred_state_seq) == len(gold_state_seq) == len(pred_loc_seq) - 1 == len(raw_gold_loc) - 1 == total_sents
 
     prediction = []
-    prediction.append( ('N/A', 'N/A', pred_loc_seq[0], gold_loc_seq[0]) )
+    prediction.append( ('N/A', 'N/A', pred_loc_seq[0], raw_gold_loc[0]) )
     for i in range(total_sents):
-        prediction.append( (pred_state_seq[i], gold_state_seq[i], pred_loc_seq[i+1], gold_loc_seq[i+1]) )
+        prediction.append( (pred_state_seq[i], gold_state_seq[i], pred_loc_seq[i+1], raw_gold_loc[i+1]) )
 
     result = {'id': para_id,
               'entity': entity_name,
               'total_sents': total_sents,
               'loc_cands': loc_cand_list,
               'prediction': prediction,
+              'gold_loc_seq': gold_loc_seq,
               'cpnet': cpnet_triples
               }
     return result
@@ -98,10 +99,8 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
     for i in range(total_instances):
         instance = output[i]
         loc_cands = instance['loc_cands']
-        assert len(loc_cands) > 3
         cpnet_triples = instance['cpnet']
-        loc_cand_line = [f'loc: {loc_cands[0]}/{loc_cands[1]}/{loc_cands[2]}']
-        cpnet_line = ['' for _ in range(7)] + loc_cand_line + cpnet_triples
+        cpnet_line = ['' for _ in range(8)] + cpnet_triples
         output_file.write('\t'.join(cpnet_line) + '\n')
         sentence_list = sentences[i]
         sentence_list.insert(0, 'N/A')
@@ -109,8 +108,9 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
         para_id = instance['id']
         entity_name = instance['entity']
         total_sents = instance['total_sents']
+        gold_loc_seq = instance['gold_loc_seq']
         state_attn_list = state_attn_log[i]
-        loc_attn_list = loc_attn_log[i][:3]
+        loc_attn_list = loc_attn_log[i]
 
         correct_state, correct_loc = 0, 0
 
@@ -119,10 +119,9 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
 
             fields = [str(para_id), str(step_i), entity_name, pred_state, gold_state, pred_loc, gold_loc, sentence_list[step_i]]
             if step_i > 0:
-                fields += [f'{state_attn:.2f}/{loc0_attn:.2f}/{loc1_attn:.2f}/{loc2_attn:.2f}'
-                           for state_attn, loc0_attn, loc1_attn, loc2_attn in
-                           zip(state_attn_list[step_i-1], loc_attn_list[0][step_i-1],
-                               loc_attn_list[1][step_i - 1], loc_attn_list[2][step_i-1])]
+                fields += [f'{state_attn:.2f}/{loc_attn:.2f}' if gold_loc_seq[step_i-1] >= 0 else f'{state_attn:.2f}/-'
+                           for state_attn, loc_attn in
+                           zip(state_attn_list[step_i-1], loc_attn_list[gold_loc_seq[step_i-1]][step_i-1])]
 
             if pred_state == gold_state and step_i > 0:
                 correct_state += 1
@@ -210,6 +209,7 @@ def test(test_set, model):
                                            pred_state_seq = pred_state_seq[i],
                                            pred_loc_seq = pred_loc_seq[i],
                                            gold_state_seq = gold_state_seq[i].tolist(),
+                                           gold_loc_seq = gold_loc_seq[i].tolist(),
                                            cpnet_triples = cpnet_triples[i])
                 output_result.append(pred_instance)
 
