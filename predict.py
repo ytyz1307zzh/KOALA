@@ -156,7 +156,8 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
                     consist_state_seq[idx] = 'O_C'
                     consist_loc_seq[idx] = '-'
                 state = 'O_C'
-                consist_loc_seq[sent_i] = '-'
+                if sent_i > 0:
+                    consist_loc_seq[sent_i] = '-'
             else:
                 for idx in range(sent_i+1, temp_idx):
                     pred_state_seq[idx] = 'E'
