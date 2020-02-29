@@ -163,11 +163,26 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
                     pred_state_seq[idx] = 'E'
 
         # if the state after O_C is not C
-        if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state in ['E', 'M'] :
+        if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state == 'M':
             print(para_id)
             print(entity)
             print(pred_state_seq)
             state = 'C'
+
+        if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state == 'E':
+            print(para_id)
+            print(entity)
+            print(pred_state_seq)
+            temp_idx = sent_i + 1
+            while temp_idx != num_sents and pred_state_seq[temp_idx] == 'E':
+                temp_idx += 1
+
+            if temp_idx != num_sents and pred_state_seq[temp_idx] == 'C':
+                for idx in range(sent_i, temp_idx):
+                    pred_state_seq[idx] = 'O_C'
+                state = 'O_C'
+            else:
+                state = 'C'
 
         if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state == 'D' :
             print(para_id)
