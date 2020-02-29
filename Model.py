@@ -131,8 +131,10 @@ class NCETModel(nn.Module):
         correct_loc_pred, total_loc_pred = compute_loc_accuracy(logits = masked_loc_logits, gold = masked_gold_loc_seq,
                                                                 pad_value = PAD_LOC)
 
+        gold_loc_mask = self.get_gold_loc_mask(loc_mask, gold_loc_seq)
         loc_attn_probs = self.get_gold_attn_probs(loc_attn_probs, gold_loc_seq)
-        attn_loss, total_attn_pred = self.get_attn_loss(state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels)
+        attn_loss, total_attn_pred = self.get_attn_loss(state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels,
+                                                        entity_mask, gold_loc_mask, print_hidden)
 
         if self.is_test:  # inference
             pred_loc_seq = get_pred_loc(loc_logits = masked_loc_logits, gold_loc_seq = gold_loc_seq)
@@ -142,11 +144,19 @@ class NCETModel(nn.Module):
                correct_loc_pred, total_loc_pred, total_attn_pred
 
 
-    def get_attn_loss(self, state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels):
+    def get_attn_loss(self, state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels,
+                      entity_mask, gold_loc_mask, print_hidden):
         """
         Compute attention loss.
         All inputs: (batch, max_sents, max_cpnet)
+        *_mask: (batch, max_sents, max_tokens)
         """
+        # discard thos timesteps that are masked
+        # state_sent_mask = torch.sum(entity_mask, dim=-1, keepdim=True)
+        # loc_sent_mask = torch.sum(entity_mask, dim=-1, keepdim=True) + torch.sum(gold_loc_mask, dim=-1, keepdim=True)
+        # state_rel_labels = state_rel_labels.masked_fill(mask=(state_sent_mask == 0), value=0)
+        # loc_rel_labels = loc_rel_labels.masked_fill(mask=(loc_sent_mask == 0), value=0)
+
         pos_attn_probs = None
         if state_attn_probs is not None:
             state_pos_attn_probs = state_attn_probs.masked_select(mask=state_rel_labels.to(torch.bool))  # 1-D tensor
@@ -183,6 +193,21 @@ class NCETModel(nn.Module):
 
         gold_attn_probs = torch.stack(gold_attn_probs, dim=0)
         return gold_attn_probs.view(batch_size, max_sents, max_cpnet)
+
+
+    def get_gold_loc_mask(self, loc_mask, gold_loc_seq):
+        batch_size = gold_loc_seq.size(0)
+        max_sents = gold_loc_seq.size(1)
+        max_tokens = loc_mask.size(-1)
+        pick_loc_seq = gold_loc_seq.masked_fill(mask=(gold_loc_seq < 0), value=0)
+        gold_loc_mask = []
+
+        for i in range(batch_size):
+            for j in range(max_sents):
+                gold_loc_mask.append(loc_mask[i][pick_loc_seq[i][j]][j])
+
+        gold_loc_mask = torch.stack(gold_loc_mask, dim=0)
+        return gold_loc_mask.view(batch_size, max_sents, max_tokens)
 
 
     def mask_loc_logits(self, loc_logits, num_cands: torch.IntTensor):
@@ -263,7 +288,7 @@ class StateTracker(nn.Module):
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
         self.Hidden2Tag = Linear(d_in = 2 * opt.hidden_size, d_out = NUM_STATES, dropout = 0)
-        self.CpnetMemory = CpnetMemory(opt, query_size = 2 * opt.hidden_size, input_size = 4 * opt.hidden_size)
+        self.CpnetMemory = CpnetMemory(opt, query_size = 4 * opt.hidden_size, input_size = 4 * opt.hidden_size)
         self.cpnet_inject = opt.cpnet_inject
 
 
@@ -354,7 +379,7 @@ class LocationPredictor(nn.Module):
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
         self.Hidden2Score = Linear(d_in = 2 * opt.hidden_size, d_out = 1, dropout = 0)
-        self.CpnetMemory = CpnetMemory(opt, query_size=2 * opt.hidden_size, input_size=4 * opt.hidden_size)
+        self.CpnetMemory = CpnetMemory(opt, query_size=4 * opt.hidden_size, input_size=4 * opt.hidden_size)
         self.cpnet_inject = opt.cpnet_inject
 
 
@@ -499,8 +524,8 @@ class CpnetMemory(nn.Module):
 
         # use the embedding of the current sentence as the attention query
         # (batch, max_sents, 2 * hidden_size)
-        query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
-        # query = decoder_in
+        # query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
+        query = decoder_in
         attn_mask = self.get_attn_mask(cpnet_triples)
         if self.cuda:
             attn_mask = attn_mask.cuda()
@@ -513,10 +538,10 @@ class CpnetMemory(nn.Module):
         update_in, attn_probs = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask,
                                     ori_batch_size = ori_batch_size)
 
-        mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
-        if loc_mask is not None:
-            mask_vec += torch.sum(loc_mask, dim=-1, keepdim=True)
-        update_in = update_in.masked_fill(mask_vec==0, value=0)
+        # mask_vec = torch.sum(entity_mask, dim=-1, keepdim=True)
+        # if loc_mask is not None:
+        #     mask_vec += torch.sum(loc_mask, dim=-1, keepdim=True)
+        # update_in = update_in.masked_fill(mask_vec==0, value=0)
 
         return update_in, attn_probs
 

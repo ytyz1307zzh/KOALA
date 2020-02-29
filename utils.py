@@ -238,7 +238,7 @@ def find_relevant_triple(gold_loc_seq: List[str], gold_state_seq: List[str], ver
             else:
                 state_rel_list.append(0)
 
-            if token_set.intersection(loc_token_set):
+            if state in ['C', 'M'] and token_set.intersection(loc_token_set):
                 loc_rel_list.append(1)
             else:
                 loc_rel_list.append(0)
