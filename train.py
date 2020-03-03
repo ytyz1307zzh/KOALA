@@ -123,23 +123,23 @@ def save_model(path: str, model: nn.Module):
 
 def train():
 
-    train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet, verbdict_path=opt.state_verb,
-                               tokenizer=plm_tokenizer, is_test = False)
+    train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+                               verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
     shuffle_train = True
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch training set to debug.json' + '*'*20)
-        train_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, verbdict_path=opt.state_verb,
-                                   tokenizer=plm_tokenizer, is_test = False)
+        train_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+                                   verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
         shuffle_train = False
 
     train_batch = DataLoader(dataset = train_set, batch_size = opt.batch_size, shuffle = shuffle_train, collate_fn = Collate())
-    dev_set = ProparaDataset(opt.dev_set, cpnet_path=opt.cpnet, verbdict_path=opt.state_verb,
-                             tokenizer=plm_tokenizer, is_test = False)
+    dev_set = ProparaDataset(opt.dev_set, cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+                             verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
 
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch dev set to debug.json' + '*'*20)
-        dev_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, verbdict_path=opt.state_verb,
-                                 tokenizer=plm_tokenizer, is_test = False)
+        dev_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+                                 verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
 
     model = NCETModel(opt = opt, is_test = False)
     if not opt.no_cuda:
@@ -187,8 +187,10 @@ def train():
             #     print(batch, file = debug_file)
 
             paragraphs = batch['paragraph']
-            enc_outputs = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True, return_tensors='pt')
-            token_ids = enc_outputs['input_ids']
+            wiki = batch['wiki']
+            token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
+                                                                paragraphs=paragraphs,
+                                                                wiki=wiki)
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -203,6 +205,7 @@ def train():
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
+                token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -218,7 +221,8 @@ def train():
             else:
                 print_hidden = False
 
-            train_result = model(token_ids=token_ids, entity_mask = entity_mask, verb_mask = verb_mask,
+            train_result = model(token_ids = token_ids, token_type_ids = token_type_ids,
+                                 entity_mask = entity_mask, verb_mask = verb_mask,
                                  loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
                                  num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
                                  state_rel_labels = state_rel_labels, loc_rel_labels = loc_rel_labels,
@@ -338,8 +342,10 @@ def evaluate(dev_set, model):
         for batch in dev_batch:
 
             paragraphs = batch['paragraph']
-            enc_outputs = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True, return_tensors='pt')
-            token_ids = enc_outputs['input_ids']
+            wiki = batch['wiki']
+            token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
+                                                                paragraphs=paragraphs,
+                                                                wiki=wiki)
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -354,6 +360,7 @@ def evaluate(dev_set, model):
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
+                token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -369,7 +376,8 @@ def evaluate(dev_set, model):
             else:
                 print_hidden = False
 
-            eval_result = model(token_ids = token_ids, entity_mask = entity_mask, verb_mask = verb_mask,
+            eval_result = model(token_ids = token_ids, token_type_ids = token_type_ids,
+                                entity_mask = entity_mask, verb_mask = verb_mask,
                                 loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
                                 num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
                                 state_rel_labels = state_rel_labels, loc_rel_labels = loc_rel_labels,
@@ -436,8 +444,10 @@ def test(test_set, model):
         for batch in test_batch:
 
             paragraphs = batch['paragraph']
-            enc_outputs = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True, return_tensors='pt')
-            token_ids = enc_outputs['input_ids']
+            wiki = batch['wiki']
+            token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
+                                                                paragraphs=paragraphs,
+                                                                wiki=wiki)
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -452,6 +462,7 @@ def test(test_set, model):
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
+                token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -467,7 +478,8 @@ def test(test_set, model):
             else:
                 print_hidden = False
 
-            test_result = model(token_ids=token_ids, entity_mask=entity_mask, verb_mask=verb_mask,
+            test_result = model(token_ids=token_ids, token_type_ids=token_type_ids,
+                                entity_mask=entity_mask, verb_mask=verb_mask,
                                 loc_mask=loc_mask, gold_loc_seq=gold_loc_seq, gold_state_seq=gold_state_seq,
                                 num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples,
                                 state_rel_labels=state_rel_labels, loc_rel_labels=loc_rel_labels, print_hidden=print_hidden)
@@ -526,13 +538,13 @@ if __name__ == "__main__":
         plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
         plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 
-        test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet, verbdict_path=opt.state_verb,
-                                  tokenizer=plm_tokenizer, is_test=True)
+        test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+                                  verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test=True)
 
         if opt.debug:
             print('*' * 20 + '[INFO] Debug mode enabled. Switch test set to debug.json' + '*' * 20)
-            test_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, verbdict_path=opt.state_verb,
-                                      tokenizer=plm_tokenizer, is_test=True)
+            test_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+                                      verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test=True)
 
         print('[INFO] Start loading trained model...')
         restore_start_time = time.time()

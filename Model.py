@@ -71,15 +71,16 @@ class NCETModel(nn.Module):
         self.BinaryCrossEntropy = nn.BCELoss(reduction='mean')
 
         self.is_test = is_test
-        
 
-    def forward(self, token_ids: torch.Tensor, entity_mask: torch.IntTensor, verb_mask: torch.IntTensor,
-                loc_mask: torch.IntTensor, gold_loc_seq: torch.IntTensor, gold_state_seq: torch.IntTensor,
-                num_cands: torch.IntTensor, sentence_mask: torch.IntTensor, cpnet_triples: List,
-                state_rel_labels: torch.IntTensor, loc_rel_labels: torch.IntTensor, print_hidden):
+
+    def forward(self, token_ids: torch.Tensor, token_type_ids: torch.Tensor, entity_mask: torch.IntTensor,
+                verb_mask: torch.IntTensor, loc_mask: torch.IntTensor, gold_loc_seq: torch.IntTensor,
+                gold_state_seq: torch.IntTensor,num_cands: torch.IntTensor, sentence_mask: torch.IntTensor,
+                cpnet_triples: List, state_rel_labels: torch.IntTensor, loc_rel_labels: torch.IntTensor, print_hidden):
         """
         Args:
             token_ids: size (batch, max_tokens)
+            token_type_ids: size (batch, max_tokens)
             *_mask: size (batch, max_sents, max_tokens)
             gold_loc_seq: size (batch, max_sents)
             gold_state_seq: size (batch, max_sents)

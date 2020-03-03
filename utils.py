@@ -88,6 +88,35 @@ def count_average():
     load_data('./data/test.json')
 
 
+def prepare_input_text_pair(tokenizer, paragraphs, wiki):
+    """
+    Prepare input for the model. Format: <CLS> paragraph <SEP> wiki <SEP>
+    Truncate wiki if overflow.
+    Args:
+        paragraphs - (batch,) each element is a string
+        wiki - (batch, num_wiki) each element is a string
+    Return:
+        batch_input - (batch * num_wiki, max_tokens)
+    """
+    batch_text_pair = []
+    assert len(paragraphs) == len(wiki)
+    batch_size = len(paragraphs)
+    max_wiki = len(wiki[0])
+
+    for i in range(batch_size):
+        text_pair = [(paragraphs[i], wiki[i][j]) for j in range(max_wiki)]
+        batch_text_pair.extend(text_pair)
+
+    outputs = tokenizer.batch_encode_plus(batch_text_pair, add_special_tokens=True, max_length=tokenizer.max_len,
+                                          truncation_strategy='only_second', return_tensors='pt',
+                                          return_token_type_ids=True)
+
+    input_ids = outputs['input_ids']
+    token_type_ids = outputs['token_type_ids']
+
+    return input_ids, token_type_ids
+
+
 def find_allzero_rows(vector: torch.IntTensor) -> torch.BoolTensor:
     """
     Find all-zero rows of a given tensor, which is of size (batch, max_sents, max_tokens).
