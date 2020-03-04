@@ -62,9 +62,11 @@ parser.add_argument('-output', type=str, default=None, help="path to store predi
 # commonsense parameters
 parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
-parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
+parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
+parser.add_argument('-finetune', action='store_true', default=False, help='whether to fine-tune the bert encoder')
+parser.add_argument('-no_wiki', action='store_true', default=False, help='specify to exclude wiki')
 
 # other parameters
 parser.add_argument('-debug', action='store_true', default=False, help="enable debug mode, change data files to debug data")
@@ -188,9 +190,14 @@ def train():
 
             paragraphs = batch['paragraph']
             wiki = batch['wiki']
-            token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
-                                                                paragraphs=paragraphs,
-                                                                wiki=wiki)
+            if opt.no_wiki:
+                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                            return_tensors='pt')['input_ids']
+                token_type_ids = None
+            else:
+                token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
+                                                                    paragraphs=paragraphs,
+                                                                    wiki=wiki)
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -205,7 +212,8 @@ def train():
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
-                token_type_ids = token_type_ids.cuda()
+                if token_type_ids is not None:
+                    token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -343,9 +351,14 @@ def evaluate(dev_set, model):
 
             paragraphs = batch['paragraph']
             wiki = batch['wiki']
-            token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
-                                                                paragraphs=paragraphs,
-                                                                wiki=wiki)
+            if opt.no_wiki:
+                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                            return_tensors='pt')['input_ids']
+                token_type_ids = None
+            else:
+                token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
+                                                                    paragraphs=paragraphs,
+                                                                    wiki=wiki)
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -360,7 +373,8 @@ def evaluate(dev_set, model):
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
-                token_type_ids = token_type_ids.cuda()
+                if token_type_ids is not None:
+                    token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -445,9 +459,14 @@ def test(test_set, model):
 
             paragraphs = batch['paragraph']
             wiki = batch['wiki']
-            token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
-                                                                paragraphs=paragraphs,
-                                                                wiki=wiki)
+            if opt.no_wiki:
+                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                            return_tensors='pt')['input_ids']
+                token_type_ids = None
+            else:
+                token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
+                                                                    paragraphs=paragraphs,
+                                                                    wiki=wiki)
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -462,7 +481,8 @@ def test(test_set, model):
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
-                token_type_ids = token_type_ids.cuda()
+                if token_type_ids is not None:
+                    token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()

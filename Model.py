@@ -44,22 +44,19 @@ class NCETModel(nn.Module):
         self.plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 
         # ConceptNet encoder
-        # if is_test:
-        #     self.cpnet_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
-        # else:
-        #     self.cpnet_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
-        # for param in self.cpnet_encoder.parameters():
-        #     param.requires_grad = False
-
-        # Embedding language model
         if is_test:
-            self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
+            self.cpnet_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
         else:
-            self.embed_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
-        for param in self.embed_encoder.parameters():
+            self.cpnet_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
+        for param in self.cpnet_encoder.parameters():
             param.requires_grad = False
 
         self.CpnetEncoder = FixedSentEncoder(opt)
+        if not opt.no_wiki:
+            self.EmbeddingLayer = TokenEmbedding(opt, plm_config=self.plm_config,
+                                                 plm_model_class=plm_model_class,
+                                                 pad_token_id=self.plm_tokenizer.pad_token_id,
+                                                 is_test=is_test)
 
         # state tracking modules
         self.StateTracker = StateTracker(opt)
@@ -79,8 +76,8 @@ class NCETModel(nn.Module):
                 cpnet_triples: List, state_rel_labels: torch.IntTensor, loc_rel_labels: torch.IntTensor, print_hidden):
         """
         Args:
-            token_ids: size (batch, max_tokens)
-            token_type_ids: size (batch, max_tokens)
+            token_ids: size (batch * max_wiki, max_ctx_tokens)
+            token_type_ids: size (batch * max_wiki, max_ctx_tokens)
             *_mask: size (batch, max_sents, max_tokens)
             gold_loc_seq: size (batch, max_sents)
             gold_state_seq: size (batch, max_sents)
@@ -89,21 +86,27 @@ class NCETModel(nn.Module):
             num_cands: size (batch,)
         """
         assert entity_mask.size(-2) == verb_mask.size(-2) == loc_mask.size(-2) == gold_state_seq.size(-1) == gold_loc_seq.size(-1)
-        assert entity_mask.size(-1) == verb_mask.size(-1) == loc_mask.size(-1) == token_ids.size(-1)
-        batch_size = token_ids.size(0)
-        max_tokens = token_ids.size(1)
+        assert entity_mask.size(-1) == verb_mask.size(-1) == loc_mask.size(-1)
+        batch_size = entity_mask.size(0)
+        max_tokens = entity_mask.size(-1)
         max_sents = gold_state_seq.size(-1)
         max_cands = loc_mask.size(-3)
 
-        attention_mask = (token_ids != self.plm_tokenizer.pad_token_id).to(torch.int)
-        plm_outputs = self.embed_encoder(token_ids, attention_mask=attention_mask)
-        embeddings = plm_outputs[0]  # hidden states at the last layer, (batch, max_tokens, plm_hidden_size)
+        if self.opt.no_wiki:
+            attention_mask = (token_ids != self.plm_tokenizer.pad_token_id).to(torch.int)
+            plm_outputs = self.cpnet_encoder(token_ids, attention_mask=attention_mask)
+            embeddings = plm_outputs[0]  # hidden states at the last layer, (batch, max_tokens, plm_hidden_size)
+        else:
+            assert token_ids.size(-1) == token_type_ids.size(-1)
+            assert token_ids.size(0) % batch_size == 0
+            max_wiki = token_ids.size(0) // batch_size
+            embeddings = self.EmbeddingLayer(token_ids=token_ids, token_type_ids=token_type_ids, num_wiki=max_wiki)
 
         token_rep, _ = self.TokenEncoder(embeddings)  # (batch, max_tokens, 2*hidden_size)
         token_rep = self.Dropout(token_rep)
         assert token_rep.size() == (batch_size, max_tokens, 2 * self.hidden_size)
 
-        cpnet_rep = self.CpnetEncoder(cpnet_triples, tokenizer=self.plm_tokenizer, encoder=self.embed_encoder)
+        cpnet_rep = self.CpnetEncoder(cpnet_triples, tokenizer=self.plm_tokenizer, encoder=self.cpnet_encoder)
 
         # state change prediction
         # size (batch, max_sents, NUM_STATES)
@@ -275,6 +278,106 @@ class NCETModel(nn.Module):
         vec = vec.unsqueeze(1).repeat(1, loc_cands, 1)
         vec = vec.view(batch_size * loc_cands, seq_len)
         return vec
+
+
+class TokenEmbedding(nn.Module):
+    """
+    Token embedding layer to generate contextualized token embeddings
+    """
+    def __init__(self, opt: argparse.Namespace, plm_config, plm_model_class, pad_token_id, is_test: bool):
+        super(TokenEmbedding, self).__init__()
+        self.plm_config = plm_config
+        self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
+        self.pad_token_id = pad_token_id
+        self.input_token_type = 0
+        self.cuda = not opt.no_cuda
+
+        # Embedding language model
+        if is_test:
+            self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
+        else:
+            self.embed_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
+        if not opt.finetune:
+            for param in self.embed_encoder.parameters():
+                param.requires_grad = False
+
+        self.weight_fc = Linear(d_in=self.embed_size, d_out=1, dropout=0)
+        self.Dropout = nn.Dropout(p=opt.dropout)
+
+
+    def forward(self, token_ids: torch.Tensor, token_type_ids: torch.Tensor, num_wiki: int):
+        """
+        Args:
+            token_ids - (batch * num_wiki, max_ctx_tokens)
+            token_type_ids - (batch * num_wiki, max_ctx_tokens)
+        """
+        assert token_ids.size() == token_type_ids.size()
+        assert token_ids.size(0) % num_wiki == 0
+        batch_size = token_ids.size(0) // num_wiki
+        max_ctx_tokens = token_ids.size(-1)
+
+        token_id_batches = [token_ids[batch_idx * batch_size: (batch_idx + 1) * batch_size]
+                            for batch_idx in range(token_ids.size(0) // batch_size + 1)]
+        token_type_id_batches = [token_type_ids[batch_idx * batch_size: (batch_idx + 1) * batch_size]
+                                 for batch_idx in range(token_type_ids.size(0) // batch_size + 1)]
+
+        num_ori_tokens = torch.sum((token_type_ids == self.input_token_type), dim=-1)
+        max_ori_tokens = torch.max(num_ori_tokens).item()
+
+        unpad_token_mask = (token_ids.view(batch_size, num_wiki, max_ctx_tokens) != 0)
+        unpad_token_sum = torch.sum(unpad_token_mask, dim=-1)
+        ori_token_sum = num_ori_tokens.view_as(unpad_token_sum)
+        second_sent_tokens = unpad_token_sum - ori_token_sum
+        wiki_mask = (second_sent_tokens == 1)
+
+        batch_last_hidden, batch_cls_hidden = [], []
+
+        for batch_token_ids, batch_token_type_ids\
+                in zip(token_id_batches, token_type_id_batches):
+
+            mini_batch_size = batch_token_ids.size(0)
+            if mini_batch_size == 0:
+                continue
+
+            attention_mask = (batch_token_ids != self.pad_token_id).to(torch.int)
+
+            if self.cuda:
+                batch_token_ids = batch_token_ids.cuda()
+                batch_token_type_ids = batch_token_type_ids.cuda()
+                attention_mask = attention_mask.cuda()
+
+            outputs = self.embed_encoder(batch_token_ids, attention_mask=attention_mask,
+                                         token_type_ids=batch_token_type_ids)
+            last_hidden = outputs[0]
+            cls_hidden = outputs[1]
+            assert last_hidden.size() == (mini_batch_size, max_ctx_tokens, self.embed_size)
+            assert cls_hidden.size() == (mini_batch_size, self.embed_size)
+
+            second_sent_mask = batch_token_type_ids.unsqueeze(-1)
+            last_hidden = last_hidden.masked_fill((second_sent_mask == 1), value=0)
+
+            first_sent_hidden = torch.narrow(last_hidden, dim=1, start=0, length=max_ori_tokens)
+            batch_last_hidden.append(first_sent_hidden)
+            batch_cls_hidden.append(cls_hidden)
+
+        batch_last_hidden = torch.stack(batch_last_hidden, dim=0)
+        batch_cls_hidden = torch.stack(batch_cls_hidden, dim=0)
+        batch_last_hidden = batch_last_hidden.view(batch_size, num_wiki, max_ori_tokens * self.embed_size)
+        batch_cls_hidden = batch_cls_hidden.view(batch_size, num_wiki, self.embed_size)
+        batch_last_hidden = self.Dropout(batch_last_hidden)
+        batch_cls_hidden = self.Dropout(batch_cls_hidden)
+
+        attn_weights = self.weight_fc(batch_cls_hidden).squeeze()  # (batch, num_wiki)
+        attn_weights = attn_weights.masked_fill(wiki_mask, value=float('-inf'))
+        attn_probs = F.softmax(attn_weights, dim=-1)  # (batch, num_wiki)
+
+        is_nan = torch.isnan(attn_probs)
+        attn_probs = attn_probs.masked_fill(is_nan, value = 1 / num_wiki)
+
+        embedding = torch.bmm(attn_probs.unsqueeze(1), batch_last_hidden)  # (batch, 1, max_ctx_tokens * embed_size)
+        embedding = embedding.squeeze().view(batch_size, max_ori_tokens, self.embed_size)
+
+        return embedding
 
 
 class StateTracker(nn.Module):
