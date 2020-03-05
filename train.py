@@ -89,7 +89,11 @@ plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 if opt.ckpt_dir and not os.path.exists(opt.ckpt_dir):
     os.mkdir(opt.ckpt_dir)
 if opt.ckpt_dir:
-    log_file = open(os.path.join(opt.ckpt_dir, 'train.log'), 'w', encoding='utf-8')
+    log_path = os.path.join(opt.ckpt_dir, 'train.log')
+    if os.path.exists(log_path):
+        log_file = open(log_path, 'a', encoding='utf-8')
+    else:
+        log_file = open(log_path, 'w', encoding='utf-8')
 
 
 def output(text):
@@ -109,7 +113,7 @@ if opt.n_gpu > 0:
     torch.cuda.manual_seed_all(1234)
 
 
-def save_model(path: str, model: nn.Module):
+def save_model(ckpt_dir, model_name, model: nn.Module, optimizer):
     if opt.save_mode == 'none':
         return
 
@@ -118,9 +122,11 @@ def save_model(path: str, model: nn.Module):
         raise RuntimeError("Did not specify -ckpt_dir option")
 
     model_to_save = model.module if hasattr(model, "module") else model
-
     model_state_dict = model_to_save.state_dict()
-    torch.save(model_state_dict, path)
+    optim_state_dict = optimizer.state_dict()
+
+    torch.save(model_state_dict, os.path.join(ckpt_dir, model_name))
+    torch.save(optim_state_dict, os.path.join(ckpt_dir, "optimizer.pt"))
 
 
 def train():
@@ -144,12 +150,20 @@ def train():
                                  verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
 
     model = NCETModel(opt = opt, is_test = False)
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=opt.lr)
+
+    if opt.restore is not None:
+        model_state_dict = torch.load(opt.restore)
+        model.load_state_dict(model_state_dict)
+        optim_state_dict = torch.load(os.path.join(opt.ckpt_dir, "optimizer.pt"))
+        optimizer.load_state_dict(optim_state_dict)
+        print(f'[INFO] Loaded model and optimizer from {opt.ckpt_dir}, resume training...')
+
     if not opt.no_cuda:
         model.cuda()
         if opt.n_gpu > 1:
             model = nn.DataParallel(model)
 
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=opt.lr)
     best_score = np.NINF
     impatience = 0
     epoch_i = 0
@@ -305,18 +319,18 @@ def train():
                         impatience = 0
                         output('New best score!')
                         if opt.save_mode == 'all':
-                            save_model(os.path.join(opt.ckpt_dir, f'best_checkpoint_{best_score:.3f}.pt'), model)
+                            save_model(opt.ckpt_dir, f'best_checkpoint_{best_score:.3f}.pt', model, optimizer)
                         elif opt.save_mode == 'best':
-                            save_model(os.path.join(opt.ckpt_dir, f'best_checkpoint.pt'), model)
+                            save_model(opt.ckpt_dir, f'best_checkpoint.pt', model, optimizer)
                     else:
                         impatience += 1
                         output(f'Impatience: {impatience}, best score: {best_score:.3f}.')
                         if opt.save_mode == 'all':
-                            save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
+                            save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
                         if impatience >= opt.impatience:
                             output('Early Stopping!')
                             if opt.save_mode == 'last':
-                                save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
+                                save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
                             quit()
 
                     report_state_loss, report_loc_loss = 0, 0
@@ -328,7 +342,7 @@ def train():
         epoch_i += 1
 
     if opt.save_mode == 'last':
-        save_model(os.path.join(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt'), model)
+        save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
 
 
         # summary(model, char_paragraph, entity_mask, verb_mask, loc_mask)

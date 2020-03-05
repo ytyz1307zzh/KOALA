@@ -136,7 +136,8 @@ class NCETModel(nn.Module):
                                                                 pad_value = PAD_LOC)
 
         gold_loc_mask = self.get_gold_loc_mask(loc_mask, gold_loc_seq)
-        loc_attn_probs = self.get_gold_attn_probs(loc_attn_probs, gold_loc_seq)
+        if loc_attn_probs is not None:
+            loc_attn_probs = self.get_gold_attn_probs(loc_attn_probs, gold_loc_seq)
         attn_loss, total_attn_pred = self.get_attn_loss(state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels,
                                                         entity_mask, gold_loc_mask, print_hidden)
 
