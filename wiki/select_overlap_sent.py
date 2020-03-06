@@ -1,3 +1,9 @@
+'''
+ @Date  : 03/02/2019
+ @Author: Zhihan Zhang
+ @mail  : zhangzhihan@pku.edu.cn
+ @homepage: ytyz1307zzh.github.io
+'''
 import json
 import argparse
 from tqdm import tqdm
