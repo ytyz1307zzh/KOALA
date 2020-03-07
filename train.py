@@ -46,8 +46,9 @@ parser.add_argument('-grad_accum_step', default=1, type=int, help='gradient accu
 # training parameters
 parser.add_argument('-mode', type=str, choices=['train', 'test'], default='train', help="train or test")
 parser.add_argument('-ckpt_dir', type=str, default=None, help="checkpoint directory")
-parser.add_argument('-save_mode', type=str, choices=['best', 'all', 'none', 'last'], default='best',
-                    help="best (default): save checkpoints when reaching new best score; all: save all checkpoints; none: don't save")
+parser.add_argument('-save_mode', type=str, choices=['best', 'all', 'none', 'last', 'best-last'], default='best',
+                    help="best (default): save checkpoints when reaching new best score; all: save all checkpoints; "
+                         "none: don't save; best-last: save both the best and the last checkpoint")
 parser.add_argument('-epoch', type=int, default=100, help="number of epochs, use -1 to rely on early stopping only")
 parser.add_argument('-impatience', type=int, default=20, help='number of evaluation rounds for early stopping, use -1 to disable early stopping')
 parser.add_argument('-report', type=int, default=2, help="report frequence per epoch, should be at least 1")
@@ -322,7 +323,7 @@ def train():
                         output('New best score!')
                         if opt.save_mode == 'all':
                             save_model(opt.ckpt_dir, f'best_checkpoint_{best_score:.3f}.pt', model, optimizer)
-                        elif opt.save_mode == 'best':
+                        elif opt.save_mode in ['best', 'best-last']:
                             save_model(opt.ckpt_dir, f'best_checkpoint.pt', model, optimizer)
                     else:
                         impatience += 1
@@ -331,7 +332,7 @@ def train():
                             save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
                         if impatience >= opt.impatience:
                             output('Early Stopping!')
-                            if opt.save_mode == 'last':
+                            if opt.save_mode in ['last', 'best-last']:
                                 save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
                             quit()
 
@@ -343,7 +344,7 @@ def train():
 
         epoch_i += 1
 
-    if opt.save_mode == 'last':
+    if opt.save_mode in ['last', 'best-last']:
         save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
 
 
