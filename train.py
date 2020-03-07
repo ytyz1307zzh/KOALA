@@ -34,11 +34,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-per_gpu_batch_size', type=int, default=64)
 parser.add_argument('-plm_model_class', type=str, default='bert', help='pre-trained language model class')
 parser.add_argument('-plm_model_name', type=str, default='bert-base-uncased', help='pre-trained language model name')
+parser.add_argument('-embed_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
 parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of lstm")
 parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
 parser.add_argument('-loc_loss', type=float, default=0.3, help="hyper-parameter to weight location loss")
-parser.add_argument('-attn_loss', type=float, default=0.25, help="hyper-parameter to weight attention loss")
+parser.add_argument('-attn_loss', type=float, default=0.3, help="hyper-parameter to weight attention loss")
 parser.add_argument('-max_grad_norm', default=1.0, type=float, help="Max gradient norm")
 parser.add_argument('-grad_accum_step', default=1, type=int, help='gradient accumulation steps')
 
@@ -60,11 +61,11 @@ parser.add_argument('-dummy_test', type=str, default="data/dummy-predictions.tsv
 parser.add_argument('-output', type=str, default=None, help="path to store prediction outputs")
 
 # commonsense parameters
-parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
+parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
-parser.add_argument('-wiki', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
+parser.add_argument('-wiki_path', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
 parser.add_argument('-finetune', action='store_true', default=False, help='whether to fine-tune the bert encoder')
 parser.add_argument('-no_wiki', action='store_true', default=False, help='specify to exclude wiki')
 
@@ -131,22 +132,22 @@ def save_model(ckpt_dir, model_name, model: nn.Module, optimizer):
 
 def train():
 
-    train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+    train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
                                verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
     shuffle_train = True
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch training set to debug.json' + '*'*20)
-        train_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+        train_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
                                    verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
         shuffle_train = False
 
     train_batch = DataLoader(dataset = train_set, batch_size = opt.batch_size, shuffle = shuffle_train, collate_fn = Collate())
-    dev_set = ProparaDataset(opt.dev_set, cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+    dev_set = ProparaDataset(opt.dev_set, cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
                              verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
 
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch dev set to debug.json' + '*'*20)
-        dev_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+        dev_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
                                  verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
 
     model = NCETModel(opt = opt, is_test = False)
@@ -204,14 +205,15 @@ def train():
 
             paragraphs = batch['paragraph']
             wiki = batch['wiki']
-            if opt.no_wiki:
-                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
-                                                            return_tensors='pt')['input_ids']
-                token_type_ids = None
-            else:
+            if not opt.no_wiki and not opt.embed_plm_path:
                 token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
                                                                     paragraphs=paragraphs,
                                                                     wiki=wiki)
+            else:
+                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                            return_tensors='pt')['input_ids']
+                token_type_ids = None
+
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -365,14 +367,15 @@ def evaluate(dev_set, model):
 
             paragraphs = batch['paragraph']
             wiki = batch['wiki']
-            if opt.no_wiki:
-                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
-                                                            return_tensors='pt')['input_ids']
-                token_type_ids = None
-            else:
+            if not opt.no_wiki and not opt.embed_plm_path:
                 token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
                                                                     paragraphs=paragraphs,
                                                                     wiki=wiki)
+            else:
+                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                            return_tensors='pt')['input_ids']
+                token_type_ids = None
+
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -473,14 +476,15 @@ def test(test_set, model):
 
             paragraphs = batch['paragraph']
             wiki = batch['wiki']
-            if opt.no_wiki:
-                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
-                                                            return_tensors='pt')['input_ids']
-                token_type_ids = None
-            else:
+            if not opt.no_wiki and not opt.embed_plm_path:
                 token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
                                                                     paragraphs=paragraphs,
                                                                     wiki=wiki)
+            else:
+                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                            return_tensors='pt')['input_ids']
+                token_type_ids = None
+
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -572,12 +576,12 @@ if __name__ == "__main__":
         plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
         plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 
-        test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+        test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
                                   verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test=True)
 
         if opt.debug:
             print('*' * 20 + '[INFO] Debug mode enabled. Switch test set to debug.json' + '*' * 20)
-            test_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet, wiki_path=opt.wiki,
+            test_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
                                       verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test=True)
 
         print('[INFO] Start loading trained model...')

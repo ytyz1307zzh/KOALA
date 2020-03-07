@@ -48,15 +48,25 @@ class NCETModel(nn.Module):
             self.cpnet_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
         else:
             self.cpnet_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
+        print(f'[INFO] Loaded {opt.plm_model_name} for ConceptNet encoder')
         for param in self.cpnet_encoder.parameters():
             param.requires_grad = False
 
         self.CpnetEncoder = FixedSentEncoder(opt)
-        if not opt.no_wiki:
+        if not opt.no_wiki and not opt.embed_plm_path:
             self.EmbeddingLayer = TokenEmbedding(opt, plm_config=self.plm_config,
                                                  plm_model_class=plm_model_class,
                                                  pad_token_id=self.plm_tokenizer.pad_token_id,
                                                  is_test=is_test)
+        elif not opt.no_wiki:
+            if is_test:
+                self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
+            else:
+                self.embed_encoder = plm_model_class.from_pretrained(opt.embed_plm_path)
+            print(f'[INFO] Loaded {opt.embed_plm_path} for embedding language model')
+            if not opt.finetune:
+                for param in self.embed_encoder.parameters():
+                    param.requires_grad = False
 
         # state tracking modules
         self.StateTracker = StateTracker(opt)
@@ -95,6 +105,10 @@ class NCETModel(nn.Module):
         if self.opt.no_wiki:
             attention_mask = (token_ids != self.plm_tokenizer.pad_token_id).to(torch.int)
             plm_outputs = self.cpnet_encoder(token_ids, attention_mask=attention_mask)
+            embeddings = plm_outputs[0]  # hidden states at the last layer, (batch, max_tokens, plm_hidden_size)
+        elif not self.opt.no_wiki and self.opt.embed_plm_path:
+            attention_mask = (token_ids != self.plm_tokenizer.pad_token_id).to(torch.int)
+            plm_outputs = self.embed_encoder(token_ids, attention_mask=attention_mask)
             embeddings = plm_outputs[0]  # hidden states at the last layer, (batch, max_tokens, plm_hidden_size)
         else:
             assert token_ids.size(-1) == token_type_ids.size(-1)
@@ -298,6 +312,7 @@ class TokenEmbedding(nn.Module):
             self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
         else:
             self.embed_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
+        print(f'[INFO] Loaded {opt.plm_model_name} for embedding language model')
         if not opt.finetune:
             for param in self.embed_encoder.parameters():
                 param.requires_grad = False

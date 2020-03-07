@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-data_dir', type=str, default='data', help='directory to the original data')
 parser.add_argument('-wiki', type=str, default='wiki/wiki_para_50.json', help='file containing wiki data')
 parser.add_argument('-output_dir', type=str, default='finetune_data', help='output directory')
+parser.add_argument('-add_test', default=False, action='store_true')
 opt = parser.parse_args()
 
 
@@ -28,7 +29,7 @@ def read_dataset(dataset: List[Dict]):
             text_list.append(instance['paragraph'])
             para_ids.append(id_)
 
-    return text_list
+    return text_list, para_ids
 
 
 def main():
@@ -41,20 +42,24 @@ def main():
     train_text = []
     eval_text = []
 
-    train_paras = read_dataset(train_set)
-    dev_paras = read_dataset(dev_set)
-    test_paras = read_dataset(test_set)
+    train_paras, train_ids = read_dataset(train_set)
+    dev_paras, dev_ids = read_dataset(dev_set)
+    test_paras, test_ids = read_dataset(test_set)
 
     train_text.extend(train_paras * 10)
     train_text.extend(dev_paras * 10)
-    train_text.extend(test_paras * 10)
-    eval_text.extend(train_paras)
-    eval_text.extend(dev_paras)
+    if opt.add_test:
+        train_text.extend(test_paras * 10)
+    # eval_text.extend(train_paras)
+    # eval_text.extend(dev_paras)
     eval_text.extend(test_paras)
 
     for instance in wiki_data:
 
+        para_id = instance['para_id']
         wiki_paras = instance['wiki']
+        if para_id in test_ids and not opt.add_test:
+            continue
 
         for wiki in wiki_paras:
             wiki_text = wiki['text']

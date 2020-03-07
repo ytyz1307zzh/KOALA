@@ -47,10 +47,7 @@ from transformers import (
 )
 
 
-try:
-    from torch.utils.tensorboard import SummaryWriter
-except ImportError:
-    from tensorboardX import SummaryWriter
+from tensorboardX import SummaryWriter
 
 
 logger = logging.getLogger(__name__)
