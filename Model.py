@@ -62,10 +62,10 @@ class NCETModel(nn.Module):
                 self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
             else:
                 self.embed_encoder = plm_model_class.from_pretrained(opt.embed_plm_path)
+                if not opt.finetune:
+                    for param in self.embed_encoder.parameters():
+                        param.requires_grad = False
             print(f'[INFO] Loaded {opt.embed_plm_path} for embedding language model')
-            if not opt.finetune:
-                for param in self.embed_encoder.parameters():
-                    param.requires_grad = False
 
         # state tracking modules
         self.StateTracker = StateTracker(opt)
@@ -311,10 +311,10 @@ class TokenEmbedding(nn.Module):
             self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
         else:
             self.embed_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
+            if not opt.finetune:
+                for param in self.embed_encoder.parameters():
+                    param.requires_grad = False
         print(f'[INFO] Loaded {opt.plm_model_name} for embedding language model')
-        if not opt.finetune:
-            for param in self.embed_encoder.parameters():
-                param.requires_grad = False
 
         self.weight_fc = Linear(d_in=self.embed_size, d_out=1, dropout=0)
         self.Dropout = nn.Dropout(p=opt.dropout)
