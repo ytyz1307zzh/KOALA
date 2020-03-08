@@ -18,12 +18,10 @@ import argparse
 # from torchsummaryX import summary
 # from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
-from allennlp.modules.elmo import batch_to_ids
 from utils import *
 from predict import *
 from Dataset import *
 from Model import *
-import datetime as dt
 print(f'[INFO] Import modules time: {time.time() - import_start_time}s')
 torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False)
 
@@ -34,7 +32,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-per_gpu_batch_size', type=int, default=64)
 parser.add_argument('-plm_model_class', type=str, default='bert', help='pre-trained language model class')
 parser.add_argument('-plm_model_name', type=str, default='bert-base-uncased', help='pre-trained language model name')
-parser.add_argument('-embed_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
 parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of lstm")
 parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
@@ -67,6 +64,7 @@ parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_ve
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
 parser.add_argument('-wiki_path', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
+parser.add_argument('-embed_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
 parser.add_argument('-finetune', action='store_true', default=False, help='whether to fine-tune the bert encoder')
 parser.add_argument('-no_wiki', action='store_true', default=False, help='specify to exclude wiki')
 
@@ -125,10 +123,11 @@ def save_model(ckpt_dir, model_name, model: nn.Module, optimizer):
 
     model_to_save = model.module if hasattr(model, "module") else model
     model_state_dict = model_to_save.state_dict()
-    optim_state_dict = optimizer.state_dict()
-
     torch.save(model_state_dict, os.path.join(ckpt_dir, model_name))
-    torch.save(optim_state_dict, os.path.join(ckpt_dir, "optimizer.pt"))
+
+    if opt.save_mode in ['last', 'best-last', 'all']:
+        optim_state_dict = optimizer.state_dict()
+        torch.save(optim_state_dict, os.path.join(ckpt_dir, "optimizer.pt"))
 
 
 def train():

@@ -17,7 +17,6 @@ from typing import List, Dict
 from Constants import *
 import itertools
 from utils import *
-from allennlp.modules.elmo import Elmo
 from torchcrf import CRF
 import argparse
 import pdb
