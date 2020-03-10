@@ -16,7 +16,7 @@ from typing import List, Dict
 from Constants import *
 import argparse
 # from torchsummaryX import summary
-# from tensorboardX import SummaryWriter
+from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 from utils import *
 from predict import *
@@ -24,6 +24,7 @@ from Dataset import *
 from Model import *
 print(f'[INFO] Import modules time: {time.time() - import_start_time}s')
 torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False)
+tb_writer = SummaryWriter()
 
 
 parser = argparse.ArgumentParser()
@@ -168,6 +169,7 @@ def train():
     best_score = np.NINF
     impatience = 0
     epoch_i = 0
+    report_cnt = 0
 
     if opt.epoch == -1:
         opt.epoch = np.inf
@@ -312,8 +314,12 @@ def train():
                            f'Time Elapse: {time.time()-start_time:.2f}s')
                     output('-' * 50)
 
+                    report_cnt += 1
+                    tb_writer.add_scalar('train_state_loss', state_loss, report_cnt)
+                    tb_writer.add_scalar('train_loc_loss', loc_loss, report_cnt)
+
                     model.eval()
-                    eval_score = evaluate(dev_set, model)
+                    eval_score = evaluate(dev_set, model, report_cnt)
                     model.train()
 
                     if eval_score > best_score:  # new best score
@@ -333,6 +339,7 @@ def train():
                             output('Early Stopping!')
                             if opt.save_mode in ['last', 'best-last']:
                                 save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
+                            tb_writer.close()
                             quit()
 
                     report_state_loss, report_loc_loss = 0, 0
@@ -345,6 +352,7 @@ def train():
 
     if opt.save_mode in ['last', 'best-last']:
         save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
+    tb_writer.close()
 
 
         # summary(model, char_paragraph, entity_mask, verb_mask, loc_mask)
@@ -352,7 +360,7 @@ def train():
         #     writer.add_graph(model, (char_paragraph, entity_mask, verb_mask, loc_mask, gold_loc_mask, gold_state_mask))
 
 
-def evaluate(dev_set, model):
+def evaluate(dev_set, model, report_cnt: int):
     dev_batch = DataLoader(dataset = dev_set, batch_size = opt.batch_size, shuffle = False, collate_fn = Collate())
 
     start_time = time.time()
@@ -456,6 +464,9 @@ def evaluate(dev_set, model):
            f'Location Accuracy: {loc_accuracy * 100:.3f}% \n'
            f'\tTime Elapse: {time.time() - start_time:.2f}s')
     output('*' * 50)
+
+    tb_writer.add_scalar('eval_state_loss', state_loss, report_cnt)
+    tb_writer.add_scalar('eval_loc_loss', loc_loss, report_cnt)
 
     return total_accuracy * 100
 
