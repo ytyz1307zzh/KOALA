@@ -334,11 +334,11 @@ def train():
                         impatience += 1
                         output(f'Impatience: {impatience}, best score: {best_score:.3f}.')
                         if opt.save_mode == 'all':
-                            save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
+                            save_model(opt.ckpt_dir, f'checkpoint{report_cnt}_{eval_score:.3f}.pt', model, optimizer)
                         if impatience >= opt.impatience:
                             output('Early Stopping!')
                             if opt.save_mode in ['last', 'best-last']:
-                                save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
+                                save_model(opt.ckpt_dir, f'checkpoint{report_cnt}_{eval_score:.3f}.pt', model, optimizer)
                             tb_writer.close()
                             quit()
 
@@ -351,7 +351,7 @@ def train():
         epoch_i += 1
 
     if opt.save_mode in ['last', 'best-last']:
-        save_model(opt.ckpt_dir, f'checkpoint_{eval_score:.3f}.pt', model, optimizer)
+        save_model(opt.ckpt_dir, f'checkpoint{report_cnt}_{eval_score:.3f}.pt', model, optimizer)
     tb_writer.close()
 
 
