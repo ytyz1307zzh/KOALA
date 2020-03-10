@@ -24,7 +24,6 @@ from Dataset import *
 from Model import *
 print(f'[INFO] Import modules time: {time.time() - import_start_time}s')
 torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False)
-tb_writer = SummaryWriter()
 
 
 parser = argparse.ArgumentParser()
@@ -74,6 +73,8 @@ parser.add_argument('-debug', action='store_true', default=False, help="enable d
 parser.add_argument('-no_cuda', action='store_true', default=False, help="if true, will only use cpu")
 
 opt = parser.parse_args()
+
+tb_writer = SummaryWriter(logdir=os.path.join('runs', opt.ckpt_dir.split('/')[-1])) if opt.ckpt_dir else SummaryWriter()
 
 try:
     opt.n_gpu = len(os.environ["CUDA_VISIBLE_DEVICES"].split(','))
@@ -152,6 +153,10 @@ def train():
                                  verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
 
     model = NCETModel(opt = opt, is_test = False)
+    if not opt.no_cuda:
+        model.cuda()
+        if opt.n_gpu > 1:
+            model = nn.DataParallel(model)
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=opt.lr)
 
     if opt.restore is not None:
@@ -160,11 +165,6 @@ def train():
         optim_state_dict = torch.load(os.path.join(opt.ckpt_dir, "optimizer.pt"))
         optimizer.load_state_dict(optim_state_dict)
         print(f'[INFO] Loaded model and optimizer from {opt.ckpt_dir}, resume training...')
-
-    if not opt.no_cuda:
-        model.cuda()
-        if opt.n_gpu > 1:
-            model = nn.DataParallel(model)
 
     best_score = np.NINF
     impatience = 0
