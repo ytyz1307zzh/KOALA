@@ -74,8 +74,6 @@ parser.add_argument('-no_cuda', action='store_true', default=False, help="if tru
 
 opt = parser.parse_args()
 
-tb_writer = SummaryWriter(logdir=os.path.join('runs', opt.ckpt_dir.split('/')[-1])) if opt.ckpt_dir else SummaryWriter()
-
 try:
     opt.n_gpu = len(os.environ["CUDA_VISIBLE_DEVICES"].split(','))
 except KeyError:  # did not specify device from cmd
@@ -133,6 +131,14 @@ def save_model(ckpt_dir, model_name, model: nn.Module, optimizer):
 
 
 def train():
+
+    if opt.ckpt_dir:
+        if opt.ckpt_dir.endswith('/'):
+            tb_writer = SummaryWriter(logdir=os.path.join('runs', opt.ckpt_dir.split('/')[-2]))
+        else:
+            tb_writer = SummaryWriter(logdir=os.path.join('runs', opt.ckpt_dir.split('/')[-1]))
+    else:
+        tb_writer = SummaryWriter()
 
     train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
                                verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
@@ -319,7 +325,7 @@ def train():
                     tb_writer.add_scalar('train_loc_loss', loc_loss, report_cnt)
 
                     model.eval()
-                    eval_score = evaluate(dev_set, model, report_cnt)
+                    eval_score = evaluate(dev_set, model, tb_writer, report_cnt)
                     model.train()
 
                     if eval_score > best_score:  # new best score
@@ -360,7 +366,7 @@ def train():
         #     writer.add_graph(model, (char_paragraph, entity_mask, verb_mask, loc_mask, gold_loc_mask, gold_state_mask))
 
 
-def evaluate(dev_set, model, report_cnt: int):
+def evaluate(dev_set, model, tb_writer, report_cnt: int):
     dev_batch = DataLoader(dataset = dev_set, batch_size = opt.batch_size, shuffle = False, collate_fn = Collate())
 
     start_time = time.time()
