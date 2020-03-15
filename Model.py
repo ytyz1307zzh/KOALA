@@ -45,9 +45,12 @@ class NCETModel(nn.Module):
         # ConceptNet encoder
         if is_test:
             self.cpnet_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
+        elif opt.cpnet_plm_path:
+            self.cpnet_encoder = plm_model_class.from_pretrained(opt.cpnet_plm_path)
+            print(f'[INFO] Loaded {opt.cpnet_plm_path} for ConceptNet encoder')
         else:
             self.cpnet_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
-        print(f'[INFO] Loaded {opt.plm_model_name} for ConceptNet encoder')
+            print(f'[INFO] Loaded {opt.plm_model_name} for ConceptNet encoder')
         for param in self.cpnet_encoder.parameters():
             param.requires_grad = False
 

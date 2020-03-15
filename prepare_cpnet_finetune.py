@@ -64,6 +64,8 @@ def main():
     with open(train_path, 'w', encoding='utf8') as train_file:
         for sent in omcs_sents:
             train_file.write(sent + '\n')
+        for sent in cpnet_sents:
+            train_file.write(sent + '\n')
 
     with open(eval_path, 'w', encoding='utf8') as eval_file:
         for sent in cpnet_sents:

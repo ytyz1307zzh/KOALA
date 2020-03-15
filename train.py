@@ -60,6 +60,7 @@ parser.add_argument('-output', type=str, default=None, help="path to store predi
 
 # commonsense parameters
 parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
+parser.add_argument('-cpnet_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
 parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
