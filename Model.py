@@ -45,6 +45,7 @@ class NCETModel(nn.Module):
         # ConceptNet encoder
         if is_test:
             self.cpnet_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
+            print(f'[INFO] Loaded an empty {opt.plm_model_name} for ConceptNet encoder during testing')
         elif opt.cpnet_plm_path:
             self.cpnet_encoder = plm_model_class.from_pretrained(opt.cpnet_plm_path)
             print(f'[INFO] Loaded {opt.cpnet_plm_path} for ConceptNet encoder')
@@ -63,6 +64,7 @@ class NCETModel(nn.Module):
         else:
             if is_test:
                 self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
+                print(f'[INFO] Loaded an empty {opt.plm_model_name} for embedding language model during testing')
             elif opt.embed_plm_path:
                 assert not opt.no_wiki, "Specified -no_wiki option but used a pre-fine-tuned BERT"
                 self.embed_encoder = plm_model_class.from_pretrained(opt.embed_plm_path)
@@ -70,7 +72,7 @@ class NCETModel(nn.Module):
             else:
                 self.embed_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
                 print(f'[INFO] Loaded {opt.plm_model_name} for embedding language model')
-            if not opt.finetune:
+            if not is_test and not opt.finetune:
                 for param in self.embed_encoder.parameters():
                     param.requires_grad = False
 
