@@ -22,13 +22,18 @@ tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
 def parse_text(sequence_list: List[str], outf_path: str):
     outf = open(outf_path, 'w', encoding='utf-8')
+    total_tokens = 0
+    total_noun_verb = 0
 
     for sentence in tqdm(sequence_list):
         tokens = tokenizer.tokenize(sentence)
         pos_list = pos_tag(tokens, tagset='universal')
         word_pos = [str(idx) for idx in range(len(pos_list)) if pos_list[idx][1] in ['NOUN', 'VERB']]
         outf.write(' '.join(word_pos) + '\n')
+        total_tokens += len(tokens)
+        total_noun_verb += len(word_pos)
 
+    print(f'Total tokens: {total_tokens}, total nouns + verbs: {total_noun_verb} ({total_noun_verb/total_tokens*100:.2f}%)')
     outf.close()
 
 
