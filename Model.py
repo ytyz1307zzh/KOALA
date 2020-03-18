@@ -31,8 +31,6 @@ class NCETModel(nn.Module):
         self.hidden_size = opt.hidden_size
         self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
 
-        self.TokenEncoder = nn.LSTM(input_size = self.embed_size, hidden_size = opt.hidden_size,
-                                    num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
 
         # fixed pretrained language model
@@ -115,15 +113,14 @@ class NCETModel(nn.Module):
             assert token_ids.size(-1) == token_type_ids.size(-1)
             assert token_ids.size(0) % batch_size == 0
             max_wiki = token_ids.size(0) // batch_size
-            embeddings = self.EmbeddingLayer(token_ids=token_ids, token_type_ids=token_type_ids, num_wiki=max_wiki)
+            token_rep = self.EmbeddingLayer(token_ids=token_ids, token_type_ids=token_type_ids, num_wiki=max_wiki)
         else:
             attention_mask = (token_ids != self.plm_tokenizer.pad_token_id).to(torch.int)
             plm_outputs = self.embed_encoder(token_ids, attention_mask=attention_mask)
-            embeddings = plm_outputs[0]  # hidden states at the last layer, (batch, max_tokens, plm_hidden_size)
+            token_rep = plm_outputs[0]  # hidden states at the last layer, (batch, max_tokens, plm_hidden_size)
 
-        token_rep, _ = self.TokenEncoder(embeddings)  # (batch, max_tokens, 2*hidden_size)
         token_rep = self.Dropout(token_rep)
-        assert token_rep.size() == (batch_size, max_tokens, 2 * self.hidden_size)
+        assert token_rep.size() == (batch_size, max_tokens, self.embed_size)
 
         cpnet_rep = self.CpnetEncoder(cpnet_triples, tokenizer=self.plm_tokenizer, encoder=self.cpnet_encoder)
 
@@ -408,19 +405,20 @@ class StateTracker(nn.Module):
     def __init__(self, opt: argparse.Namespace):
 
         super(StateTracker, self).__init__()
+        self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
         self.hidden_size = opt.hidden_size
-        self.Decoder = nn.LSTM(input_size = 4 * opt.hidden_size, hidden_size = opt.hidden_size,
+        self.Decoder = nn.LSTM(input_size = 2 * self.embed_size, hidden_size = opt.hidden_size,
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
         self.Hidden2Tag = Linear(d_in = 2 * opt.hidden_size, d_out = NUM_STATES, dropout = 0)
-        self.CpnetMemory = CpnetMemory(opt, query_size = 4 * opt.hidden_size, input_size = 4 * opt.hidden_size)
+        self.CpnetMemory = CpnetMemory(opt, query_size = 2 * self.embed_size, input_size = 2 * self.embed_size)
         self.cpnet_inject = opt.cpnet_inject
 
 
     def forward(self, encoder_out, entity_mask, verb_mask, sentence_mask, cpnet_triples, cpnet_rep):
         """
         Args:
-            encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
+            encoder_out: output of the encoder, size (batch, max_tokens, embed_size)
             entity_mask: size (batch, max_sents, max_tokens)
             verb_mask: size (batch, max_sents, max_tokens)
             sentence_mask: size(batch, max_sents, max_tokens)
@@ -429,9 +427,9 @@ class StateTracker(nn.Module):
         batch_size = encoder_out.size(0)
         max_sents = entity_mask.size(-2)
 
-        # (batch, max_sents, 4 * hidden_size)
+        # (batch, max_sents, 2 * embed_size)
         decoder_in = self.get_masked_input(encoder_out, entity_mask, verb_mask, batch_size = batch_size)
-        # (batch, max_sents, 4 * hidden_size)
+        # (batch, max_sents, 2 * embed_size)
         attn_probs = None
         if self.cpnet_inject in ['state', 'both']:
             decoder_in, attn_probs = self.CpnetMemory(encoder_out, decoder_in, entity_mask,
@@ -454,14 +452,14 @@ class StateTracker(nn.Module):
         assert entity_mask.size(-1) == encoder_out.size(-2)
 
         max_sents = entity_mask.size(-2)
-        entity_rep = self.get_masked_mean(source = encoder_out, mask = entity_mask, batch_size = batch_size)  # (batch, max_sents, 2 * hidden_size)
-        verb_rep = self.get_masked_mean(source = encoder_out, mask = verb_mask, batch_size = batch_size)  # (batch, max_sents, 2 * hidden_size)
-        concat_rep = torch.cat([entity_rep, verb_rep], dim = -1)  # (batch, max_sents, 4 * hidden_size)
+        entity_rep = self.get_masked_mean(source = encoder_out, mask = entity_mask, batch_size = batch_size)  # (batch, max_sents, embed_size)
+        verb_rep = self.get_masked_mean(source = encoder_out, mask = verb_mask, batch_size = batch_size)  # (batch, max_sents, embed_size)
+        concat_rep = torch.cat([entity_rep, verb_rep], dim = -1)  # (batch, max_sents, 2 *embed_size)
 
-        assert concat_rep.size() == (batch_size, max_sents, 4 * self.hidden_size)
+        assert concat_rep.size() == (batch_size, max_sents, 2 * self.embed_size)
         entity_existence = find_allzero_rows(vector = entity_mask).unsqueeze(dim = -1)  # (batch, max_sents, 1)
         masked_rep = concat_rep.masked_fill(mask = entity_existence, value = 0)
-        assert masked_rep.size() == (batch_size, max_sents, 4 * self.hidden_size)
+        assert masked_rep.size() == (batch_size, max_sents, 2 * self.embed_size)
 
         return masked_rep
 
@@ -469,17 +467,17 @@ class StateTracker(nn.Module):
     def get_masked_mean(self, source, mask, batch_size: int):
         """
         Args:
-            source - input tensors, size(batch, tokens, 2 * hidden_size)
+            source - input tensors, size(batch, tokens, embed_size)
             mask - binary masked vectors, size(batch, sents, tokens)
         Return:
-            the average of unmasked input tensors, size (batch, sents, 2 * hidden_size)
+            the average of unmasked input tensors, size (batch, sents, embed_size)
         """
         max_sents = mask.size(-2)
 
         bool_mask = (mask.unsqueeze(dim = -1) == 0)  # turn binary masks to boolean values
         masked_source = source.unsqueeze(dim = 1).masked_fill(bool_mask, value = 0)
         masked_source = torch.sum(masked_source, dim = -2)  # sum the unmasked vectors
-        assert masked_source.size() == (batch_size, max_sents, 2 * self.hidden_size)
+        assert masked_source.size() == (batch_size, max_sents, self.embed_size)
 
         num_unmasked_tokens = torch.sum(mask, dim = -1, keepdim = True)  # compute the denominator of average op
         masked_mean = torch.div(input = masked_source, other = num_unmasked_tokens)  # average the unmasked vectors
@@ -488,7 +486,7 @@ class StateTracker(nn.Module):
         is_nan = torch.isnan(masked_mean)
         masked_mean = masked_mean.masked_fill(is_nan, value = 0)
 
-        assert masked_mean.size() == (batch_size, max_sents, 2 * self.hidden_size)
+        assert masked_mean.size() == (batch_size, max_sents, self.embed_size)
         return masked_mean
 
 
@@ -499,19 +497,20 @@ class LocationPredictor(nn.Module):
     def __init__(self, opt: argparse.Namespace):
 
         super(LocationPredictor, self).__init__()
+        self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
         self.hidden_size = opt.hidden_size
-        self.Decoder = nn.LSTM(input_size = 4 * opt.hidden_size, hidden_size = opt.hidden_size,
+        self.Decoder = nn.LSTM(input_size = 2 * self.embed_size, hidden_size = opt.hidden_size,
                                     num_layers = 1, batch_first = True, bidirectional = True)
         self.Dropout = nn.Dropout(p = opt.dropout)
         self.Hidden2Score = Linear(d_in = 2 * opt.hidden_size, d_out = 1, dropout = 0)
-        self.CpnetMemory = CpnetMemory(opt, query_size=4 * opt.hidden_size, input_size=4 * opt.hidden_size)
+        self.CpnetMemory = CpnetMemory(opt, query_size=2 * self.embed_size, input_size=2 * self.embed_size)
         self.cpnet_inject = opt.cpnet_inject
 
 
     def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples, cpnet_rep):
         """
         Args:
-            encoder_out: output of the encoder, size (batch, max_tokens, 2 * hidden_size)
+            encoder_out: output of the encoder, size (batch, max_tokens, embed_size)
             entity_mask: size (batch, max_sents, max_tokens)
             sentence_mask: size(batch, max_sents, max_tokens)
             cpnet_triples: List, (batch, num_cpnet)
@@ -522,7 +521,7 @@ class LocationPredictor(nn.Module):
         max_sents = loc_mask.size(-2)
 
         decoder_in = self.get_masked_input(encoder_out, entity_mask, loc_mask, batch_size = batch_size)
-        decoder_in = decoder_in.view(batch_size * max_cands, max_sents, 4 * self.hidden_size)
+        decoder_in = decoder_in.view(batch_size * max_cands, max_sents, 2 * self.embed_size)
         attn_probs = None
         if self.cpnet_inject in ['location', 'both']:
             decoder_in, attn_probs = self.CpnetMemory(encoder_out=NCETModel.expand_dim_3d(encoder_out, max_cands),
@@ -551,15 +550,15 @@ class LocationPredictor(nn.Module):
         max_cands = loc_mask.size(-3)
         max_sents = loc_mask.size(-2)
 
-        # (batch, max_sents, 2 * hidden_size)
+        # (batch, max_sents, embed_size)
         entity_rep = self.get_masked_mean(source = encoder_out, mask = entity_mask, batch_size = batch_size)
-        # (batch, max_cands, max_sents, 2 * hidden_size)
+        # (batch, max_cands, max_sents, embed_size)
         loc_rep = self.get_masked_loc_mean(source = encoder_out, mask = loc_mask, batch_size = batch_size)
         entity_rep = entity_rep.unsqueeze(dim = 1).expand_as(loc_rep)
-        assert entity_rep.size() == loc_rep.size() == (batch_size, max_cands, max_sents, 2 * self.hidden_size)
+        assert entity_rep.size() == loc_rep.size() == (batch_size, max_cands, max_sents, self.embed_size)
 
         concat_rep = torch.cat([entity_rep, loc_rep], dim = -1)
-        assert concat_rep.size() == (batch_size, max_cands, max_sents, 4 * self.hidden_size)
+        assert concat_rep.size() == (batch_size, max_cands, max_sents, 2 * self.embed_size)
 
         return concat_rep
 
@@ -567,10 +566,10 @@ class LocationPredictor(nn.Module):
     def get_masked_loc_mean(self, source, mask, batch_size: int):
         """
         Args:
-            source - input tensors, size(batch, tokens, 2 * hidden_size)
+            source - input tensors, size(batch, tokens, embed_size)
             mask - binary masked vectors, size(batch, cands, sents, tokens)
         Return:
-            the average of unmasked input tensors, size (batch, cands, sents, 2 * hidden_size)
+            the average of unmasked input tensors, size (batch, cands, sents, embed_size)
         """
         max_sents = mask.size(-2)
         max_cands = mask.size(-3)
@@ -579,7 +578,7 @@ class LocationPredictor(nn.Module):
         source = source.unsqueeze(dim = 1).unsqueeze(dim = 1)  # expand source to (batch, 1, 1, tokens, 2*hidden)
         masked_source = source.masked_fill(bool_mask, value = 0)  # (batch, cands, sents, tokens, 2*hidden)
         masked_source = torch.sum(masked_source, dim = -2)  # (batch, cands, sents, 2*hidden)
-        assert masked_source.size() == (batch_size, max_cands, max_sents, 2 * self.hidden_size)
+        assert masked_source.size() == (batch_size, max_cands, max_sents, self.embed_size)
 
         num_unmasked_tokens = torch.sum(mask, dim = -1, keepdim = True)  # (batch, cands, sents, 1)
         masked_mean = torch.div(input = masked_source, other = num_unmasked_tokens)  # (batch, cands, sents, 2*hidden)
@@ -588,24 +587,24 @@ class LocationPredictor(nn.Module):
         is_nan = torch.isnan(masked_mean)
         masked_mean = masked_mean.masked_fill(is_nan, value = 0)
 
-        assert masked_mean.size() == (batch_size, max_cands, max_sents, 2 * self.hidden_size)
+        assert masked_mean.size() == (batch_size, max_cands, max_sents, self.embed_size)
         return masked_mean
 
 
     def get_masked_mean(self, source, mask, batch_size: int):
         """
         Args:
-            source - input tensors, size(batch, tokens, 2 * hidden_size)
+            source - input tensors, size(batch, tokens, embed_size)
             mask - binary masked vectors, size(batch, sents, tokens)
         Return:
-            the average of unmasked input tensors, size (batch, sents, 2 * hidden_size)
+            the average of unmasked input tensors, size (batch, sents, embed_size)
         """
         max_sents = mask.size(-2)
 
         bool_mask = (mask.unsqueeze(dim = -1) == 0)  # turn binary masks to boolean values
         masked_source = source.unsqueeze(dim = 1).masked_fill(bool_mask, value = 0)  # for masked tokens, turn its value to 0
         masked_source = torch.sum(masked_source, dim = -2)  # sum the unmasked token representations
-        assert masked_source.size() == (batch_size, max_sents, 2 * self.hidden_size)
+        assert masked_source.size() == (batch_size, max_sents, self.embed_size)
 
         num_unmasked_tokens = torch.sum(mask, dim = -1, keepdim = True)  # compute the denominator of average op (number of unmasked tokens)
         masked_mean = torch.div(input = masked_source, other = num_unmasked_tokens)  # average the unmasked vectors
@@ -614,7 +613,7 @@ class LocationPredictor(nn.Module):
         is_nan = torch.isnan(masked_mean)
         masked_mean = masked_mean.masked_fill(is_nan, value = 0)
 
-        assert masked_mean.size() == (batch_size, max_sents, 2 * self.hidden_size)
+        assert masked_mean.size() == (batch_size, max_sents, self.embed_size)
         return masked_mean
 
 
@@ -623,9 +622,9 @@ class CpnetMemory(nn.Module):
     def __init__(self, opt, query_size: int, input_size: int):
         super(CpnetMemory, self).__init__()
         self.cuda = not opt.no_cuda
-        self.hidden_size = opt.hidden_size
+        self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
         self.query_size = query_size
-        self.value_size = 2 * opt.hidden_size
+        self.value_size = self.embed_size
         self.input_size = input_size
         self.AttnUpdate = GatedAttnUpdate(query_size=self.query_size, value_size=self.value_size,
                                           input_size=self.input_size, dropout=opt.dropout)
@@ -635,9 +634,9 @@ class CpnetMemory(nn.Module):
                 cpnet_rep, loc_mask = None):
         """
         Args:
-            encoder_out: size (batch, max_tokens, 2 * hidden_size)
-            decoder_in: (batch, max_sents, 4 * hidden_size) for state tracking,
-                        (batch * max_cands, max_sents, 4 * hidden_size) for location prediciton
+            encoder_out: size (batch, max_tokens, embed_size)
+            decoder_in: (batch, max_sents, 2 * embed_size) for state tracking,
+                        (batch * max_cands, max_sents, 2 * embed_size) for location prediciton
             entity_mask: size(batch, max_sents, max_tokens)
             sentence_mask: size(batch, max_sents, max_tokens)
             cpnet_triples: List, (batch, num_cands)
@@ -648,7 +647,7 @@ class CpnetMemory(nn.Module):
         ori_batch_size = cpnet_rep.size(0)
 
         # use the embedding of the current sentence as the attention query
-        # (batch, max_sents, 2 * hidden_size)
+        # (batch, max_sents, embed_size)
         # query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
         query = decoder_in
         attn_mask = self.get_attn_mask(cpnet_triples)
@@ -674,17 +673,17 @@ class CpnetMemory(nn.Module):
     def get_masked_mean(self, source, mask, batch_size: int):
         """
         Args:
-            source - input tensors, size(batch, tokens, 2 * hidden_size)
+            source - input tensors, size(batch, tokens, embed_size)
             mask - binary masked vectors, size(batch, sents, tokens)
         Return:
-            the average of unmasked input tensors, size (batch, sents, 2 * hidden_size)
+            the average of unmasked input tensors, size (batch, sents, embed_size)
         """
         max_sents = mask.size(-2)
 
         bool_mask = (mask.unsqueeze(dim = -1) == 0)  # turn binary masks to boolean values
         masked_source = source.unsqueeze(dim = 1).masked_fill(bool_mask, value = 0)  # for masked tokens, turn its value to 0
         masked_source = torch.sum(masked_source, dim = -2)  # sum the unmasked token representations
-        assert masked_source.size() == (batch_size, max_sents, 2 * self.hidden_size)
+        assert masked_source.size() == (batch_size, max_sents, self.embed_size)
 
         num_unmasked_tokens = torch.sum(mask, dim = -1, keepdim = True)  # compute the denominator of average op (number of unmasked tokens)
         masked_mean = torch.div(input = masked_source, other = num_unmasked_tokens)  # average the unmasked vectors
@@ -693,7 +692,7 @@ class CpnetMemory(nn.Module):
         is_nan = torch.isnan(masked_mean)
         masked_mean = masked_mean.masked_fill(is_nan, value = 0)
 
-        assert masked_mean.size() == (batch_size, max_sents, 2 * self.hidden_size)
+        assert masked_mean.size() == (batch_size, max_sents, self.embed_size)
         return masked_mean
 
 
@@ -785,10 +784,7 @@ class FixedSentEncoder(nn.Module):
     def __init__(self, opt):
         super(FixedSentEncoder, self).__init__()
         self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
-        self.hidden_size = opt.hidden_size
         self.lm_batch_size = opt.batch_size
-        self.LSTM = nn.LSTM(input_size=self.embed_size, hidden_size=self.hidden_size,
-                            num_layers=1, batch_first=True, bidirectional=True)
 
         self.cuda = not opt.no_cuda
         self.Dropout = nn.Dropout(p=opt.dropout)
@@ -822,14 +818,13 @@ class FixedSentEncoder(nn.Module):
             with torch.no_grad():
                 outputs = encoder(batch_input_ids, attention_mask=attention_mask)
 
-            last_hidden = outputs[0]  # (batch, seq_len, hidden_size)
+            last_hidden = outputs[0]  # (batch, seq_len, embed_size)
             assert last_hidden.size() == (mini_batch_size, max_len, self.embed_size)
 
-            encoder_out, _ = self.LSTM(last_hidden)
-            encoder_out = self.Dropout(encoder_out)
+            last_hidden = self.Dropout(last_hidden)
 
             for i in range(last_hidden.size(0)):
-                embedding = encoder_out[i]  # (max_length, hidden_size)
+                embedding = last_hidden[i]  # (max_length, embed_size)
                 pad_mask = attention_mask[i]
                 num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
                 token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
@@ -839,9 +834,9 @@ class FixedSentEncoder(nn.Module):
                 sent_embed.append(mean_embed)
 
         sent_embed = torch.stack(sent_embed, dim=0)
-        assert sent_embed.size() == (batch_size * num_cands, 2 * self.hidden_size)
+        assert sent_embed.size() == (batch_size * num_cands, self.embed_size)
         sent_embed = self.Dropout(sent_embed)
-        sent_embed = sent_embed.view(batch_size, num_cands, 2 * self.hidden_size)
+        sent_embed = sent_embed.view(batch_size, num_cands, self.embed_size)
 
         return sent_embed
 
