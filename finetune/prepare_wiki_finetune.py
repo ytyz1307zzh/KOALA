@@ -12,9 +12,9 @@ import os
 from typing import List, Dict
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-data_dir', type=str, default='data', help='directory to the original data')
-parser.add_argument('-wiki', type=str, default='wiki/wiki_para_50.json', help='file containing wiki data')
-parser.add_argument('-output_dir', type=str, default='finetune_data', help='output directory')
+parser.add_argument('-data_dir', type=str, default='../data', help='directory to the original data')
+parser.add_argument('-wiki', type=str, default='../wiki/wiki_para_50.json', help='file containing wiki data')
+parser.add_argument('-output_dir', type=str, default='../finetune_data', help='output directory')
 parser.add_argument('-add_test', default=False, action='store_true')
 parser.add_argument('-wiki_only', default=False, action='store_true', help='specify to only add wiki paragraphs into train.txt')
 opt = parser.parse_args()
