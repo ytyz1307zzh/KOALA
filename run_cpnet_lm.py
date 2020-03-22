@@ -118,7 +118,13 @@ class LineByLineTextDataset(Dataset):
         with open(file_path, encoding="utf-8") as f:
             lines = [line for line in f.read().splitlines() if (len(line) > 0 and not line.isspace())]
 
-        self.examples = tokenizer.batch_encode_plus(lines, add_special_tokens=True, max_length=block_size)["input_ids"]
+        def process(line):
+            line = line.strip().split()
+            ids = tokenizer.convert_tokens_to_ids(line)
+            trunc_ids = tokenizer.prepare_for_model(ids=ids, max_length=args.block_size, add_special_tokens=False)
+            return trunc_ids['input_ids']
+
+        self.examples = list(map(process, lines))
 
         logger.info("Reading POS mention positions from file at %s", pos_file_path)
         self.pos_mention = read_pos_file(pos_file_path)
@@ -217,6 +223,7 @@ def mask_tokens(inputs, tokenizer: PreTrainedTokenizer, args) -> Tuple[torch.Ten
 
     labels = token_ids.clone()
     # We sample a few tokens in each sequence for masked-LM training (with probability args.mlm_probability defaults to 0.15 in Bert/RoBERTa)
+    assert args.mlm_probability == 1.0
     probability_matrix = torch.full(labels.shape, args.mlm_probability)
     batch_size = labels.size(0)
 
@@ -235,7 +242,9 @@ def mask_tokens(inputs, tokenizer: PreTrainedTokenizer, args) -> Tuple[torch.Ten
     pos_mention_mask = torch.ones_like(probability_matrix)
     for i in range(batch_size):
         for j in pos_mention[i]:
-            pos_mention_mask[i][j + 1] = 0  # skip <CLS>
+            if j > args.block_size - 1:  # skip if out-of-index
+                continue
+            pos_mention_mask[i][j] = 0  # already include <CLS> & <SEP> during data preparation
     probability_matrix.masked_fill_(pos_mention_mask.bool(), value=0.0)
 
     # sample random tokens to mask
@@ -247,9 +256,9 @@ def mask_tokens(inputs, tokenizer: PreTrainedTokenizer, args) -> Tuple[torch.Ten
     token_ids[indices_replaced] = tokenizer.convert_tokens_to_ids(tokenizer.mask_token)
 
     # 10% of the time, we replace masked input tokens with random word
-    indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-    random_words = torch.randint(len(tokenizer), labels.shape, dtype=torch.long)
-    token_ids[indices_random] = random_words[indices_random]
+    # indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+    # random_words = torch.randint(len(tokenizer), labels.shape, dtype=torch.long)
+    # token_ids[indices_random] = random_words[indices_random]
 
     # The rest of the time (10% of the time) we keep the masked input tokens unchanged
     return token_ids, labels

@@ -235,6 +235,8 @@ def mask_tokens(inputs, tokenizer: PreTrainedTokenizer, args) -> Tuple[torch.Ten
     pos_mention_mask = torch.ones_like(probability_matrix)
     for i in range(batch_size):
         for j in pos_mention[i]:
+            if j + 1 > args.block_size - 1:  # skip if out-of-index
+                continue
             pos_mention_mask[i][j + 1] = 0  # skip <CLS>
     probability_matrix.masked_fill_(pos_mention_mask.bool(), value=0.0)
 
