@@ -802,7 +802,7 @@ class FixedSentEncoder(nn.Module):
         batch_size = len(input)
         num_cands = len(input[0])
         all_sents = itertools.chain.from_iterable(input)  # batch * num_cands
-        input_ids = list(map(lambda s: tokenizer.encode(s, add_special_tokens=True), all_sents))
+        input_ids = list(map(lambda s: tokenizer.convert_tokens_to_ids(s.split()), all_sents))  # should already add special tokens
         input_batches = [input_ids[batch_idx * self.lm_batch_size: (batch_idx + 1) * self.lm_batch_size]
                          for batch_idx in range(len(input_ids) // self.lm_batch_size + 1)]
         sent_embed = []

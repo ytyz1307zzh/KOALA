@@ -113,9 +113,12 @@ def main():
     text_outpath = os.path.join(opt.output_dir, 'cpnet.txt')
     mask_outpath = os.path.join(opt.output_dir, 'cpnet_mask.txt')
 
+    max_len = 0
+
     with open(text_outpath, 'w', encoding='utf8') as text_file:
         for sent in cpnet_sents:
             text_file.write(sent + '\n')
+            max_len = max(len(sent.strip().split()), max_len)
 
     with open(mask_outpath, 'w', encoding='utf8') as mask_file:
         for mask_pos in mask_pos_list:
@@ -123,6 +126,7 @@ def main():
             mask_file.write(' '.join(mask_pos) + '\n')
 
     print(f'Obtained a total of {len(cpnet_sents)} sentences')
+    print(f'Max sentence length: {max_len}')
 
 
 if __name__ == '__main__':

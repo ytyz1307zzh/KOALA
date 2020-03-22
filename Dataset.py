@@ -17,8 +17,7 @@ from utils import *
 
 class ProparaDataset(torch.utils.data.Dataset):
 
-    def __init__(self, data_path: str, cpnet_path: str, wiki_path: str,
-                 verbdict_path: str, tokenizer, is_test: bool):
+    def __init__(self, data_path: str, opt, tokenizer, is_test: bool):
         super(ProparaDataset, self).__init__()
 
         print('[INFO] Starting load...')
@@ -27,9 +26,10 @@ class ProparaDataset(torch.utils.data.Dataset):
 
         self.dataset = json.load(open(data_path, 'r', encoding='utf-8'))
         self.tokenizer = tokenizer
-        self.cpnet = self.read_cpnet(cpnet_path)
-        self.wiki = self.read_wiki(wiki_path)
-        self.verb_dict = json.load(open(verbdict_path, 'r', encoding='utf-8'))
+        self.cpnet_struc_input = opt.cpnet_struc_input
+        self.cpnet = self.read_cpnet(opt.cpnet_path)
+        self.wiki = self.read_wiki(opt.wiki_path)
+        self.verb_dict = json.load(open(opt.state_verb, 'r', encoding='utf-8'))
         self.state2idx = state2idx
         self.idx2state = idx2state
         self.is_test = is_test
@@ -49,7 +49,32 @@ class ProparaDataset(torch.utils.data.Dataset):
             para_id = instance['id']
             entity = instance['entity']
             cpnet_triples = instance['cpnet']
-            cpnet_sents = [triple.split(', ')[10] for triple in cpnet_triples]
+            cpnet_sents = []
+
+            for triple in cpnet_triples:
+                fields = triple.split(', ')
+                assert len(fields) == 11 or len(fields) == 13
+                sentence = fields[10]
+                sent_tokens = self.tokenizer.tokenize(sentence)
+
+                if self.cpnet_struc_input:
+                    subj = ' '.join(fields[2].strip().split('_'))
+                    obj = ' '.join(fields[5].strip().split('_'))
+                    subj_tokens = self.tokenizer.tokenize(subj)
+                    obj_tokens = self.tokenizer.tokenize(obj)
+
+                    subj_len = len(subj_tokens)
+                    obj_len = len(obj_tokens)
+                    total_len = len(sent_tokens)
+                    rel_tokens = sent_tokens[subj_len:(total_len - obj_len)]
+
+                    final_sent_tokens = [self.tokenizer.cls_token] + subj_tokens + [self.tokenizer.sep_token] + \
+                                        rel_tokens + [self.tokenizer.sep_token] + obj_tokens + [self.tokenizer.sep_token]
+                else:
+                    final_sent_tokens = [self.tokenizer.cls_token] + sent_tokens + [self.tokenizer.sep_token]
+
+                cpnet_sents.append(' '.join(final_sent_tokens))
+
             cpnet_dict[f'{para_id}-{entity}'] = cpnet_sents
 
         return cpnet_dict

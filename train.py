@@ -62,6 +62,8 @@ parser.add_argument('-output', type=str, default=None, help="path to store predi
 # commonsense parameters
 parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-cpnet_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
+parser.add_argument('-cpnet_struc_input', action='store_true', default=False,
+                    help='specify to use structural input format for ConceptNet triples')
 parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
@@ -84,6 +86,9 @@ opt.batch_size = opt.per_gpu_batch_size * opt.n_gpu
 
 if opt.cpnet_inject == 'none':
     opt.attn_loss = 0
+
+if opt.cpnet_struc_input:
+    assert opt.cpnet_plm_path is not None
 
 plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
 plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
@@ -144,21 +149,17 @@ def train():
     else:
         tb_writer = SummaryWriter()
 
-    train_set = ProparaDataset(opt.train_set, cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
-                               verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
+    train_set = ProparaDataset(opt.train_set, opt=opt, tokenizer=plm_tokenizer, is_test=False)
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch training set to debug.json' + '*'*20)
-        train_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
-                                   verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
+        train_set = ProparaDataset('data/debug.json', opt=opt, tokenizer=plm_tokenizer, is_test=False)
 
     train_batch = DataLoader(dataset = train_set, batch_size = opt.batch_size, collate_fn = Collate())
-    dev_set = ProparaDataset(opt.dev_set, cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
-                             verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
+    dev_set = ProparaDataset(opt.dev_set, opt=opt, tokenizer=plm_tokenizer, is_test=False)
 
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch dev set to debug.json' + '*'*20)
-        dev_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
-                                 verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test = False)
+        dev_set = ProparaDataset('data/debug.json', opt=opt, tokenizer=plm_tokenizer, is_test=False)
 
     model = NCETModel(opt = opt, is_test = False)
     if not opt.no_cuda:
@@ -595,13 +596,11 @@ if __name__ == "__main__":
         plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
         plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 
-        test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
-                                  verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test=True)
+        test_set = ProparaDataset(opt.test_set, opt=opt, tokenizer=plm_tokenizer, is_test=True)
 
         if opt.debug:
             print('*' * 20 + '[INFO] Debug mode enabled. Switch test set to debug.json' + '*' * 20)
-            test_set = ProparaDataset('data/debug.json', cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
-                                      verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test=True)
+            test_set = ProparaDataset('data/debug.json', opt=opt, tokenizer=plm_tokenizer, is_test=True)
 
         print('[INFO] Start loading trained model...')
         restore_start_time = time.time()
