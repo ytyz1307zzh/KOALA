@@ -827,12 +827,12 @@ class FixedSentEncoder(nn.Module):
 
             encoder_out, _ = self.LSTM(last_hidden)
             encoder_out = self.Dropout(encoder_out)
+            special_token_mask = batch_input_ids > tokenizer.sep_token_id
 
             for i in range(last_hidden.size(0)):
                 embedding = encoder_out[i]  # (max_length, hidden_size)
-                pad_mask = attention_mask[i]
-                num_tokens = torch.sum(pad_mask) - 2  # number of tokens except <PAD>, <CLS>, <SEP>
-                token_embed = embedding[1 : num_tokens + 1]  # get rid of <CLS> (first token) and <SEP> (last token)
+                real_tokens = special_token_mask[i]
+                token_embed = embedding[real_tokens]  # get rid of <CLS> and <SEP>
                 mean_embed = torch.mean(token_embed, dim=0)
                 is_nan = torch.isnan(mean_embed)
                 mean_embed = mean_embed.masked_fill(is_nan, value=0)

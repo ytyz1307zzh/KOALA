@@ -25,11 +25,12 @@ parser.add_argument('-batch_size', type=int, default=64)
 parser.add_argument('-plm_model_class', type=str, default='bert', help='pre-trained language model class')
 parser.add_argument('-plm_model_name', type=str, default='bert-base-uncased', help='pre-trained language model name')
 parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of lstm")
-parser.add_argument('-lr', type=float, default=1e-3, help="learning rate")
 parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
 
 parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-cpnet_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
+parser.add_argument('-cpnet_struc_input', action='store_true', default=False,
+                    help='specify to use structural input format for ConceptNet triples')
 parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
@@ -252,8 +253,7 @@ def test(test_set, model):
 
 
 if __name__ == "__main__":
-    test_set = ProparaDataset(opt.test_set, cpnet_path=opt.cpnet_path, wiki_path=opt.wiki_path,
-                              verbdict_path=opt.state_verb, tokenizer=plm_tokenizer, is_test=True)
+    test_set = ProparaDataset(opt.test_set, opt=opt, tokenizer=plm_tokenizer, is_test=True)
 
     print('[INFO] Start loading trained model...')
     restore_start_time = time.time()
