@@ -131,7 +131,7 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
        if state1 is "O_C", "O_D" or "C", then state0 should be "-"
     """
 
-    assert len(pred_state_seq) == len(pred_loc_seq)
+    assert len(pred_state_seq) == len(pred_loc_seq) - 1
     num_sents = len(pred_state_seq)
     consist_state_seq = []
     consist_loc_seq = []
@@ -139,7 +139,7 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
     for sent_i in range(num_sents):
 
         state = pred_state_seq[sent_i]
-        location = pred_loc_seq[sent_i]
+        location = pred_loc_seq[sent_i + 1]
 
         # if the state before O_C is not O_C
         if sent_i < num_sents-1 and pred_state_seq[sent_i+1] == 'O_C' and state != 'O_C':
@@ -193,12 +193,12 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
                     raise ValueError
                 else:
                     consist_state_seq[idx] = 'E'
-                    consist_loc_seq[idx] = '?'
-            consist_loc_seq[sent_i] = '?'
+                    consist_loc_seq[idx] = pred_loc_seq[0]
+            consist_loc_seq[sent_i] = pred_loc_seq[0]
 
         # set location according to state
         if sent_i == 0:
-            location_0 = predict_loc0(state1 = state)
+            location_0 = predict_loc0(state1 = state, loc0 = pred_loc_seq[0])
             consist_loc_seq.append(location_0)
 
         if state in ['O_C', 'O_D', 'D']:
@@ -215,12 +215,12 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
     return consist_state_seq, consist_loc_seq
 
 
-def predict_loc0(state1: str) -> str:
+def predict_loc0(state1: str, loc0: str) -> str:
 
     assert state1 in state2idx.keys()
 
     if state1 in ['E', 'M', 'D']:
-        loc0 = '?'
+        loc0 = loc0
     elif state1 in ['O_C', 'O_D', 'C']:
         loc0 = '-'
 

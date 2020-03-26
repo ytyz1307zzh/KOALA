@@ -24,7 +24,7 @@ from predict import *
 from Dataset import *
 from Model import *
 print(f'[INFO] Import modules time: {time.time() - import_start_time}s')
-torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False)
+torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False, threshold=2000)
 
 
 parser = argparse.ArgumentParser()

@@ -87,6 +87,7 @@ class NCETModel(nn.Module):
         self.BinaryCrossEntropy = nn.BCELoss(reduction='mean')
 
         self.is_test = is_test
+        self.use_cuda = not opt.no_cuda
 
 
     def forward(self, token_ids: torch.Tensor, token_type_ids: torch.Tensor, entity_mask: torch.IntTensor,
@@ -98,13 +99,15 @@ class NCETModel(nn.Module):
             token_ids: size (batch * max_wiki, max_ctx_tokens)
             token_type_ids: size (batch * max_wiki, max_ctx_tokens)
             *_mask: size (batch, max_sents, max_tokens)
+            loc_mask: size (batch, max_cands, max_sents + 1, max_tokens), +1 for location 0
             gold_loc_seq: size (batch, max_sents)
             gold_state_seq: size (batch, max_sents)
             state_rel_labels: size (batch, max_sents, max_cpnet)
             loc_rel_labels: size (batch, max_sents, max_cpnet)
             num_cands: size (batch,)
         """
-        assert entity_mask.size(-2) == verb_mask.size(-2) == loc_mask.size(-2) == gold_state_seq.size(-1) == gold_loc_seq.size(-1)
+        assert entity_mask.size(-2) == verb_mask.size(-2) == loc_mask.size(-2) - 1\
+               == gold_state_seq.size(-1) == gold_loc_seq.size(-1) - 1
         assert entity_mask.size(-1) == verb_mask.size(-1) == loc_mask.size(-1)
         batch_size = entity_mask.size(0)
         max_tokens = entity_mask.size(-1)
@@ -142,15 +145,19 @@ class NCETModel(nn.Module):
                                                         pad_value=PAD_STATE)
 
         # location prediction
-        # size (batch, max_cands, max_sents)
+        # size (batch, max_cands, max_sents + 1)
+        empty_mask = torch.zeros((batch_size, 1, max_tokens), dtype=torch.int)
+        if self.use_cuda:
+            empty_mask = empty_mask.cuda()
+        entity_mask = torch.cat([empty_mask, entity_mask], dim=1)
         loc_logits, loc_attn_probs = self.LocationPredictor(encoder_out = token_rep, entity_mask = entity_mask,
                                                             loc_mask = loc_mask, sentence_mask = sentence_mask,
                                                             cpnet_triples = cpnet_triples, cpnet_rep = cpnet_rep)
-        loc_logits = loc_logits.transpose(-1, -2)  # size (batch, max_sents, max_cands)
-        masked_loc_logits = self.mask_loc_logits(loc_logits = loc_logits, num_cands = num_cands)  # (batch, max_sents, max_cands)
-        masked_gold_loc_seq = self.mask_undefined_loc(gold_loc_seq = gold_loc_seq, mask_value = PAD_LOC)  # (batch, max_sents)
-        loc_loss = self.CrossEntropy(input = masked_loc_logits.view(batch_size * max_sents, max_cands),
-                                     target = masked_gold_loc_seq.view(batch_size * max_sents).long())
+        loc_logits = loc_logits.transpose(-1, -2)  # size (batch, max_sents + 1, max_cands)
+        masked_loc_logits = self.mask_loc_logits(loc_logits = loc_logits, num_cands = num_cands)  # (batch, max_sents + 1, max_cands)
+        masked_gold_loc_seq = self.mask_undefined_loc(gold_loc_seq = gold_loc_seq, mask_value = PAD_LOC)  # (batch, max_sents + 1)
+        loc_loss = self.CrossEntropy(input = masked_loc_logits.view(batch_size * (max_sents + 1), max_cands),
+                                     target = masked_gold_loc_seq.view(batch_size * (max_sents + 1)).long())
         correct_loc_pred, total_loc_pred = compute_loc_accuracy(logits = masked_loc_logits, gold = masked_gold_loc_seq,
                                                                 pad_value = PAD_LOC)
 
@@ -248,7 +255,7 @@ class NCETModel(nn.Module):
 
         # first, we create a mask tensor that masked all positions above the num_cands limit
         range_tensor = torch.arange(start = 1, end = max_cands + 1)
-        if not self.opt.no_cuda:
+        if self.use_cuda:
             range_tensor = range_tensor.cuda()
         range_tensor = range_tensor.unsqueeze(dim = 0).expand(batch_size, max_cands)
         bool_range = torch.gt(range_tensor, num_cands.unsqueeze(dim = -1))  # find the off-limit positions
@@ -310,7 +317,7 @@ class TokenEmbedding(nn.Module):
         self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
         self.pad_token_id = pad_token_id
         self.input_token_type = 0
-        self.cuda = not opt.no_cuda
+        self.use_cuda = not opt.no_cuda
 
         # Embedding language model
         if is_test:
@@ -362,7 +369,7 @@ class TokenEmbedding(nn.Module):
 
             attention_mask = (batch_token_ids != self.pad_token_id).to(torch.int)
 
-            if self.cuda:
+            if self.use_cuda:
                 batch_token_ids = batch_token_ids.cuda()
                 batch_token_type_ids = batch_token_type_ids.cuda()
                 attention_mask = attention_mask.cuda()
@@ -622,7 +629,7 @@ class CpnetMemory(nn.Module):
 
     def __init__(self, opt, query_size: int, input_size: int):
         super(CpnetMemory, self).__init__()
-        self.cuda = not opt.no_cuda
+        self.use_cuda = not opt.no_cuda
         self.hidden_size = opt.hidden_size
         self.query_size = query_size
         self.value_size = 2 * opt.hidden_size
@@ -652,7 +659,7 @@ class CpnetMemory(nn.Module):
         # query = self.get_masked_mean(source=encoder_out, mask=sentence_mask, batch_size=batch_size)
         query = decoder_in
         attn_mask = self.get_attn_mask(cpnet_triples)
-        if self.cuda:
+        if self.use_cuda:
             attn_mask = attn_mask.cuda()
 
         if loc_mask is not None:
@@ -790,7 +797,7 @@ class FixedSentEncoder(nn.Module):
         self.LSTM = nn.LSTM(input_size=self.embed_size, hidden_size=self.hidden_size,
                             num_layers=1, batch_first=True, bidirectional=True)
 
-        self.cuda = not opt.no_cuda
+        self.use_cuda = not opt.no_cuda
         self.Dropout = nn.Dropout(p=opt.dropout)
 
 
@@ -815,7 +822,7 @@ class FixedSentEncoder(nn.Module):
             batch_input_ids, attention_mask, max_len = \
                 FixedSentEncoder.pad_to_longest(batch=batch_input_ids,
                                                 pad_id=tokenizer.pad_token_id)
-            if self.cuda:
+            if self.use_cuda:
                 batch_input_ids = batch_input_ids.cuda()
                 attention_mask = attention_mask.cuda()
 

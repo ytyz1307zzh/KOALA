@@ -165,9 +165,9 @@ class ProparaDataset(torch.utils.data.Dataset):
         # for train and dev sets, all gold locations should have been included in candidate set
         # for test set, the gold location may not in the candidate set
         gold_loc_seq = torch.IntTensor([loc2idx[loc] if (loc in loc_cand_list or loc in ['-', '?']) else UNK_LOC
-                                            for loc in instance['gold_loc_seq'][1:]])
+                                            for loc in instance['gold_loc_seq']])
 
-        assert gold_loc_seq.size() == gold_state_seq.size()
+        assert gold_loc_seq.size(-1) == gold_state_seq.size(-1) + 1
         sentence_list = instance['sentence_list']
         sentences = [x['sentence'] for x in sentence_list]
         assert total_sents == len(sentence_list)
@@ -185,6 +185,9 @@ class ProparaDataset(torch.utils.data.Dataset):
         # (num_cand, num_sent, num_tokens)
         loc_mask_list = torch.IntTensor([[self.get_word_mask(sent['loc_mention_list'][idx], offset_map, total_words)
                                           for sent in sentence_list] for idx in range(total_loc_cands)])
+        # add an empty mask vector for location 0
+        empty_mask = torch.zeros((total_loc_cands, 1, loc_mask_list.size(-1)), dtype=torch.int)
+        loc_mask_list = torch.cat([empty_mask, loc_mask_list], dim=1)
 
         cpnet_triples = self.cpnet[f'{para_id}-{entity_name}']
         wiki_paras = self.wiki[para_id]
@@ -269,10 +272,12 @@ class Collate:
 
         # check the dimension of the data
         assert len(metadata) == len(paragraph) == len(sentences) == len(cpnet) == len(wiki) == batch_size
-        assert gold_loc_seq.size() == gold_state_seq.size() == (batch_size, max_sents)
+        assert gold_state_seq.size() == (batch_size, max_sents)
+        assert gold_loc_seq.size() == (batch_size, max_sents + 1)
         assert sentence_mask.size() == entity_mask.size() == verb_mask.size() == (batch_size, max_sents, max_tokens)
-        assert loc_mask.size() == (batch_size, max_cands, max_sents, max_tokens)
-        assert state_rel_labels.size() == loc_rel_labels.size() == (batch_size, max_sents, max_cpnet)
+        assert loc_mask.size() == (batch_size, max_cands, max_sents + 1, max_tokens)
+        assert state_rel_labels.size() == (batch_size, max_sents, max_cpnet)
+        assert loc_rel_labels.size() == (batch_size, max_sents + 1, max_cpnet)
 
         return {'metadata': metadata,
                 'paragraph': paragraph,  # unpadded, 1-dimension
@@ -300,17 +305,17 @@ class Collate:
             max_tokens -  maximum number of tokens in this batch
         """
         instance['gold_state_seq'] = self.pad_tensor(instance['gold_state_seq'], pad = max_sents, dim = 0, pad_val = PAD_STATE)
-        instance['gold_loc_seq'] = self.pad_tensor(instance['gold_loc_seq'], pad = max_sents, dim = 0, pad_val = PAD_LOC)
+        instance['gold_loc_seq'] = self.pad_tensor(instance['gold_loc_seq'], pad = max_sents + 1, dim = 0, pad_val = PAD_LOC)
 
         instance['sentence_mask'] = self.pad_mask_list(instance['sentence_mask'], max_sents = max_sents, max_tokens = max_tokens)
         instance['entity_mask'] = self.pad_mask_list(instance['entity_mask'], max_sents = max_sents, max_tokens = max_tokens)
         instance['verb_mask'] = self.pad_mask_list(instance['verb_mask'], max_sents = max_sents, max_tokens = max_tokens)
-        instance['loc_mask'] = self.pad_mask_list(instance['loc_mask'], max_sents = max_sents,
+        instance['loc_mask'] = self.pad_mask_list(instance['loc_mask'], max_sents = max_sents + 1,
                                                      max_tokens = max_tokens, max_cands = max_cands)
 
         instance['state_rel_labels'] = self.pad_rel_labels(instance['state_rel_labels'], max_sents = max_sents,
                                                            max_cpnet = max_cpnet)
-        instance['loc_rel_labels'] = self.pad_rel_labels(instance['loc_rel_labels'], max_sents=max_sents,
+        instance['loc_rel_labels'] = self.pad_rel_labels(instance['loc_rel_labels'], max_sents=max_sents + 1,
                                                          max_cpnet=max_cpnet)
         instance['cpnet'] = self.pad_str_list(instance['cpnet'], max_num = max_cpnet)
         instance['wiki'] = self.pad_str_list(instance['wiki'], max_num = max_wiki)

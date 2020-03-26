@@ -239,12 +239,15 @@ def remove_stopword(paragraph: str) -> Set[str]:
 def find_relevant_triple(gold_loc_seq: List[str], gold_state_seq: List[str], verb_dict: Dict, cpnet_triples: List[str]):
 
     assert len(gold_state_seq) == len(gold_loc_seq) - 1
-    gold_loc_seq = gold_loc_seq[1:]
     state_rel_labels, loc_rel_labels = [], []
+
+    # deal with location 0
+    loc_rel_list = [0 for _ in range(len(cpnet_triples))]
+    loc_rel_labels.append(loc_rel_list)
 
     for sent_idx in range(len(gold_state_seq)):
         state_rel_list, loc_rel_list = [], []
-        location = gold_loc_seq[sent_idx]
+        location = gold_loc_seq[sent_idx + 1]
         state = gold_state_seq[sent_idx]
 
         state_token_set = None

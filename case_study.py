@@ -25,7 +25,7 @@ parser.add_argument('-batch_size', type=int, default=64)
 parser.add_argument('-plm_model_class', type=str, default='bert', help='pre-trained language model class')
 parser.add_argument('-plm_model_name', type=str, default='bert-base-uncased', help='pre-trained language model name')
 parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of lstm")
-parser.add_argument('-dropout', type=float, default=0.5, help="dropout rate")
+parser.add_argument('-dropout', type=float, default=0, help="dropout rate")
 
 parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-cpnet_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
