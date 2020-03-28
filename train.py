@@ -150,11 +150,13 @@ def train():
         tb_writer = SummaryWriter()
 
     train_set = ProparaDataset(opt.train_set, opt=opt, tokenizer=plm_tokenizer, is_test=False)
+    shuffle_train = True
     if opt.debug:
         print('*'*20 + '[INFO] Debug mode enabled. Switch training set to debug.json' + '*'*20)
         train_set = ProparaDataset('data/debug.json', opt=opt, tokenizer=plm_tokenizer, is_test=False)
+        shuffle_train = False
 
-    train_batch = DataLoader(dataset = train_set, batch_size = opt.batch_size, collate_fn = Collate())
+    train_batch = DataLoader(dataset=train_set, batch_size=opt.batch_size, shuffle=shuffle_train, collate_fn=Collate())
     dev_set = ProparaDataset(opt.dev_set, opt=opt, tokenizer=plm_tokenizer, is_test=False)
 
     if opt.debug:
@@ -370,7 +372,7 @@ def train():
 
 
 def evaluate(dev_set, model, tb_writer, report_cnt: int):
-    dev_batch = DataLoader(dataset = dev_set, batch_size = opt.batch_size, collate_fn = Collate())
+    dev_batch = DataLoader(dataset=dev_set, batch_size=opt.batch_size, shuffle=False, collate_fn=Collate())
 
     start_time = time.time()
     report_state_loss, report_loc_loss = 0, 0
@@ -483,7 +485,7 @@ def evaluate(dev_set, model, tb_writer, report_cnt: int):
 def test(test_set, model):
 
     print('[INFO] Start testing...')
-    test_batch = DataLoader(dataset = test_set, batch_size = opt.batch_size, collate_fn = Collate())
+    test_batch = DataLoader(dataset=test_set, batch_size=opt.batch_size, shuffle=False, collate_fn=Collate())
 
     start_time = time.time()
     report_state_correct, report_state_pred = 0, 0
