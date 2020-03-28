@@ -565,7 +565,10 @@ class LocationPredictor(nn.Module):
         entity_rep = self.get_masked_mean(source = encoder_out, mask = entity_mask, batch_size = batch_size)
         # (batch, max_cands, max_sents, 2 * hidden_size)
         loc_rep = self.get_masked_loc_mean(source = encoder_out, mask = loc_mask, batch_size = batch_size)
-        unk_vec = self.unk_vec.expand(batch_size, 1, max_sents, 2 * self.hidden_size)
+        unk_vec = self.unk_vec.expand(batch_size, max_sents, 2 * self.hidden_size)
+        entity_existence = find_allzero_rows(vector = entity_mask).unsqueeze(dim = -1)  # (batch, max_sents, 1)
+        unk_vec = unk_vec.masked_fill(mask=entity_existence, value=0).unsqueeze(dim=1)  # (batch, 1, max_sents, 2*hidden)
+        assert unk_vec.size() == (batch_size, 1, max_sents, 2 * self.hidden_size)
         loc_rep = torch.cat([unk_vec, loc_rep], dim=1)  # add vector for unk
         entity_rep = entity_rep.unsqueeze(dim = 1).expand_as(loc_rep)
         assert entity_rep.size() == loc_rep.size() == (batch_size, max_cands + 1, max_sents, 2 * self.hidden_size)
