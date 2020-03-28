@@ -137,6 +137,7 @@ class ProparaDataset(torch.utils.data.Dataset):
         total_sents = instance['total_sents']
         total_loc_cands = instance['total_loc_candidates']
         loc_cand_list = instance['loc_cand_list']
+        loc_cand_list = ['?'] + loc_cand_list
 
         paragraph = instance['paragraph']
         assert len(paragraph.strip().split()) == total_words
@@ -157,14 +158,13 @@ class ProparaDataset(torch.utils.data.Dataset):
 
         gold_state_seq = torch.IntTensor([self.state2idx[label] for label in instance['gold_state_seq']])
 
-        loc2idx = {loc_cand_list[idx]: idx for idx in range(total_loc_cands)}
+        loc2idx = {candidate: idx for idx, candidate in enumerate(loc_cand_list)}
         loc2idx['-'] = NIL_LOC
-        loc2idx['?'] = UNK_LOC
         # note that the loc_cand_list in exactly "idx2loc" (excluding '?' and '-')
 
         # for train and dev sets, all gold locations should have been included in candidate set
         # for test set, the gold location may not in the candidate set
-        gold_loc_seq = torch.IntTensor([loc2idx[loc] if (loc in loc_cand_list or loc in ['-', '?']) else UNK_LOC
+        gold_loc_seq = torch.IntTensor([loc2idx[loc] if loc in loc2idx else UNK_LOC
                                             for loc in instance['gold_loc_seq']])
 
         assert gold_loc_seq.size(-1) == gold_state_seq.size(-1) + 1

@@ -194,7 +194,7 @@ def test(test_set, model):
             loc_rel_labels = batch['loc_rel_labels']
             metadata = batch['metadata']
             cpnet_cands = len(cpnet_triples[0])
-            num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
+            num_cands = torch.IntTensor([meta['total_loc_cands'] + 1 for meta in metadata])  # +1 for unk
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()

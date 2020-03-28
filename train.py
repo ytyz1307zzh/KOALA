@@ -24,7 +24,7 @@ from predict import *
 from Dataset import *
 from Model import *
 print(f'[INFO] Import modules time: {time.time() - import_start_time}s')
-torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False, threshold=2000)
+torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False, threshold=3000)
 
 
 parser = argparse.ArgumentParser()
@@ -235,7 +235,7 @@ def train():
             state_rel_labels = batch['state_rel_labels']
             loc_rel_labels = batch['loc_rel_labels']
             metadata = batch['metadata']
-            num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
+            num_cands = torch.IntTensor([meta['total_loc_cands'] + 1 for meta in metadata])  # +1 for unk
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
@@ -403,7 +403,7 @@ def evaluate(dev_set, model, tb_writer, report_cnt: int):
             state_rel_labels = batch['state_rel_labels']
             loc_rel_labels = batch['loc_rel_labels']
             metadata = batch['metadata']
-            num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
+            num_cands = torch.IntTensor([meta['total_loc_cands'] + 1 for meta in metadata])  # +1 for unk
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
@@ -515,7 +515,7 @@ def test(test_set, model):
             state_rel_labels = batch['state_rel_labels']
             loc_rel_labels = batch['loc_rel_labels']
             metadata = batch['metadata']
-            num_cands = torch.IntTensor([meta['total_loc_cands'] for meta in metadata])
+            num_cands = torch.IntTensor([meta['total_loc_cands'] + 1 for meta in metadata])  # +1 for unk
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
