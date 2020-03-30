@@ -513,6 +513,9 @@ class LocationPredictor(nn.Module):
         self.Hidden2Score = Linear(d_in = 2 * opt.hidden_size, d_out = 1, dropout = 0)
         self.CpnetMemory = CpnetMemory(opt, query_size=4 * opt.hidden_size, input_size=4 * opt.hidden_size)
         self.cpnet_inject = opt.cpnet_inject
+        unk_vec = torch.empty(2 * opt.hidden_size)
+        nn.init.uniform_(unk_vec, -math.sqrt(1 / opt.hidden_size), math.sqrt(1 / opt.hidden_size))
+        self.unk_vec = nn.Parameter(unk_vec, requires_grad=True)
 
 
     def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples, cpnet_rep):
@@ -557,14 +560,12 @@ class LocationPredictor(nn.Module):
 
         max_cands = loc_mask.size(-3)
         max_sents = loc_mask.size(-2)
-        max_tokens = loc_mask.size(-1)
 
         # (batch, max_sents, 2 * hidden_size)
         entity_rep = self.get_masked_mean(source = encoder_out, mask = entity_mask, batch_size = batch_size)
         # (batch, max_cands, max_sents, 2 * hidden_size)
         loc_rep = self.get_masked_loc_mean(source = encoder_out, mask = loc_mask, batch_size = batch_size)
-        unk_vec = self.get_unk_vec(loc_rep, loc_mask).unsqueeze(dim=1)
-        unk_vec = unk_vec.expand(batch_size, max_sents, 2 * self.hidden_size)
+        unk_vec = self.unk_vec.expand(batch_size, max_sents, 2 * self.hidden_size)
         entity_existence = find_allzero_rows(vector = entity_mask).unsqueeze(dim = -1)  # (batch, max_sents, 1)
         unk_vec = unk_vec.masked_fill(mask=entity_existence, value=0).unsqueeze(dim=1)  # (batch, 1, max_sents, 2*hidden)
         assert unk_vec.size() == (batch_size, 1, max_sents, 2 * self.hidden_size)
@@ -576,28 +577,6 @@ class LocationPredictor(nn.Module):
         assert concat_rep.size() == (batch_size, max_cands + 1, max_sents, 4 * self.hidden_size)
 
         return concat_rep
-
-
-    def get_unk_vec(self, loc_rep, loc_mask):
-        """
-        Compute the mean of all location candidates at all timesteps to be the representation vector for <unk>.
-        Args:
-            loc_rep: size (batch, max_cands, max_sents, 2 * hidden_size)
-            loc_mask: size (batch, max_cands, max_sents, max_tokens)
-        """
-        assert loc_rep.size()[:-1] == loc_mask.size()[:-1]
-        batch_size, max_cands, max_sents, max_tokens = loc_mask.size()
-
-        all_loc_rep = loc_rep.view(batch_size, max_cands * max_sents, 2 * self.hidden_size)
-        all_loc_mask = loc_mask.view(batch_size, max_cands * max_sents, max_tokens)
-        loc_existence = all_loc_mask.sum(dim=-1)  # (batch, max_cands * max_sents, 1)
-        loc_existence = loc_existence.masked_fill(loc_existence > 0, value=1)
-        loc_existence = loc_existence.sum(dim=-1, keepdim=True)
-        loc_rep_sum = all_loc_rep.sum(dim=-2)  # (batch, 2 * hidden_size)
-
-        unk_vec = torch.div(input=loc_rep_sum, other=loc_existence)
-        assert unk_vec.size() == (batch_size, 2 * self.hidden_size)
-        return unk_vec
 
 
     def get_masked_loc_mean(self, source, mask, batch_size: int):
