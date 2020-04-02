@@ -415,17 +415,18 @@ def Q10(labels, predictions):
 #----------------------------------------------------------------------------------------------------------------
 
 def main():
-    if len(sys.argv) != 4:
-        sys.stderr.write("Usage: evalQA.py para-ids gold-labels system-predictions\n")
+    if len(sys.argv) != 5:
+        sys.stderr.write("Usage: evalQA.py para-ids all-moves gold-labels system-predictions\n")
         sys.exit(-1)
     paraIds = sys.argv[1]
-    goldPred = sys.argv[2]
-    fnPred = sys.argv[3]
+    allMoves = sys.argv[2]
+    goldPred = sys.argv[3]
+    fnPred = sys.argv[4]
     qid_to_score = {}
 
     selPid = set([int(x) for x in open(paraIds).readlines()])
     gold_labels = readGold(goldPred)
-    labels = readLabels('tests/fixtures/eval/all-moves.full-grid.tsv', selPid, gold_labels)
+    labels = readLabels(allMoves, selPid, gold_labels)
     predictions = readPredictions(fnPred)
 
     blHeader = True
