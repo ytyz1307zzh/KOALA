@@ -23,12 +23,6 @@ TurkerQuestionLabel = collections.namedtuple('TurkerQuestionLabel', 'sid partici
 '''
 PredictionRecord = collections.namedtuple('PredictionRecord', 'pid sid participant from_location to_location')
 
-# Fixing tokenization mismatch while alinging participants
-manual_participant_map = { 'alternating current':'alternate current', 'fixed nitrogen':'nitrogen',
-                           'living things':'live thing', 'red giant star':'star', 'refrigerent liquid':'liquid',
-                           'remains of living things':'remains of live thing',
-                           "retina's rods and cones":"retina 's rod and cone" } #, 'seedling':'seed'}
-
 #----------------------------------------------------------------------------------------------------------------
 
 def compare_to_gold_labels(participants, system_participants):
@@ -45,10 +39,7 @@ def compare_to_gold_labels(participants, system_participants):
                 ret.append(g)
                 found = True
         if not found:
-            if p in manual_participant_map:
-                ret.append(manual_participant_map[p])
-            #else:
-            #    print("cannot find", p, system_participants)
+            print(f"Cannot find {p}")
     return ret
 
 def preprocess_locations(locations):
@@ -93,7 +84,7 @@ def preprocess_question_label(sid, participant, event_type, from_location, to_lo
 '''
 def readLabels(fnLab, selPid=None, gold_labels=None):
     fLab = open(fnLab)
-    fLab.readline()    # skip header
+    # fLab.readline()    # skip header
     ret = {}
     TurkerLabels = []
     for ln in fLab:
@@ -104,7 +95,7 @@ def readLabels(fnLab, selPid=None, gold_labels=None):
                     ret[pid] = []
                 ret[pid].append(TurkerLabels)
             TurkerLabels = []
-        elif len(f) != 11:
+        elif len(f) != 7:
             sys.stderr.write("Error: the number of fields in this line is irregular: " + ln)
             sys.exit(-1)
         else:
@@ -270,11 +261,11 @@ def Q3(labels, predictions):
     # find all created participants and their creation step
     for pid,lstTurkerLabels in labels.items():
         for turkerLabels in lstTurkerLabels:
-            for x in [x for x in turkerLabels if x.event_type == 'create' and x.to_location != 'unk']:
+            for x in [x for x in turkerLabels if x.event_type == 'create']:
                 pred_loc = predictions[pid][x.participant][x.sid].to_location
-                tp += int(pred_loc != 'null' and pred_loc != 'unk' and location_match(pred_loc, x.to_location))
-                fp += int(pred_loc != 'null' and pred_loc != 'unk' and not location_match(pred_loc, x.to_location))
-                fn += int(pred_loc == 'null' or pred_loc == 'unk')
+                tp += int(pred_loc != 'null' and location_match(pred_loc, x.to_location))
+                fp += int(pred_loc != 'null' and not location_match(pred_loc, x.to_location))
+                fn += int(pred_loc == 'null')
     return tp, fp, tn, fn
 
 #----------------------------------------------------------------------------------------------------------------
@@ -318,11 +309,11 @@ def Q6(labels, predictions):
     # find all created participants and their destroy step
     for pid,lstTurkerLabels in labels.items():
         for turkerLabels in lstTurkerLabels:
-            for x in [x for x in turkerLabels if x.event_type == 'destroy' and x.from_location != 'unk']:
+            for x in [x for x in turkerLabels if x.event_type == 'destroy']:
                 pred_loc = predictions[pid][x.participant][x.sid].from_location
-                tp += int(pred_loc != 'null' and pred_loc != 'unk' and location_match(pred_loc, x.from_location))
-                fp += int(pred_loc != 'null' and pred_loc != 'unk' and not location_match(pred_loc, x.from_location))
-                fn += int(pred_loc == 'null' or pred_loc == 'unk')
+                tp += int(pred_loc != 'null' and location_match(pred_loc, x.from_location))
+                fp += int(pred_loc != 'null' and not location_match(pred_loc, x.from_location))
+                fn += int(pred_loc == 'null')
     return tp, fp, tn, fn
 
 #----------------------------------------------------------------------------------------------------------------
@@ -392,11 +383,11 @@ def Q9(labels, predictions):
     for pid in labels:
         for turkerLabels in labels[pid]:
             for x in turkerLabels:
-                if x.event_type == 'move' and x.from_location != 'unk':
+                if x.event_type == 'move':
                     pred_loc = predictions[pid][x.participant][x.sid].from_location
-                    tp += int(pred_loc != 'null' and pred_loc != 'unk' and location_match(pred_loc, x.from_location))
-                    fp += int(pred_loc != 'null' and pred_loc != 'unk' and not location_match(pred_loc, x.from_location))
-                    fn += int(pred_loc == 'null' or pred_loc == 'unk')
+                    tp += int(pred_loc != 'null' and location_match(pred_loc, x.from_location))
+                    fp += int(pred_loc != 'null' and not location_match(pred_loc, x.from_location))
+                    fn += int(pred_loc == 'null')
     return tp,fp,tn,fn
 
 # Q10 Participant X moves at step Y, and its location after step Y is known. What is its location after step Y?
@@ -405,11 +396,11 @@ def Q10(labels, predictions):
     for pid in labels:
         for turkerLabels in labels[pid]:
             for x in turkerLabels:
-                if x.event_type == 'move' and x.to_location != 'unk':
+                if x.event_type == 'move':
                     pred_loc = predictions[pid][x.participant][x.sid].to_location
-                    tp += int(pred_loc != 'null' and pred_loc != 'unk' and location_match(pred_loc, x.to_location))
-                    fp += int(pred_loc != 'null' and pred_loc != 'unk' and not location_match(pred_loc, x.to_location))
-                    fn += int(pred_loc == 'null' or pred_loc == 'unk')
+                    tp += int(pred_loc != 'null' and location_match(pred_loc, x.to_location))
+                    fp += int(pred_loc != 'null' and not location_match(pred_loc, x.to_location))
+                    fn += int(pred_loc == 'null')
     return tp,fp,tn,fn
 
 #----------------------------------------------------------------------------------------------------------------

@@ -12,12 +12,6 @@ from typing import List, Dict
 import pylev
 PredictionRecord = namedtuple('PredictionRecord', 'para_id sid entity loc_before loc_after')
 
-# Fixing tokenization mismatch while alinging participants
-manual_participant_map = { 'alternating current': 'alternate current', 'fixed nitrogen': 'nitrogen',
-                           'living things': 'live thing', 'red giant star': 'star', 'refrigerent liquid': 'liquid',
-                           'remains of living things': 'remains of live thing',
-                           "retina's rods and cones": "retina 's rod and cone" }
-
 
 def normalize_location(location: str) -> str:
     if location == '-':
@@ -37,12 +31,9 @@ def compare_to_gold_labels(entity: str, gold_entities: List[str], para_id: int) 
         if (pylev.levenshtein(entity, gold_ent) < 3):
             return gold_ent
 
-    if entity in manual_participant_map:
-        return manual_participant_map[entity]
-    else:
-        print(para_id)
-        print(f"Cannot find {entity}")
-        return entity
+    print(para_id)
+    print(f"Cannot find {entity}")
+    return entity
 
 
 def readGold(gold_path: str):
