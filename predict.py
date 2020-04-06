@@ -101,10 +101,10 @@ def hard_constraint(state: str, loc_before: str, loc_after: str) -> (str, str, s
     3. For state CREATE, loc_before should be '-'.
     """
     if state == 'NONE' and loc_before != loc_after:
-        if loc_before == '-':  # in fact, this cannot happen
-            state = 'CREATE'
-        elif loc_after == '-':
+        if loc_after == '-':
             state = 'DESTROY'
+        else:
+            print('WHAT THE HELL?')
         # no other possibility
     if state == 'MOVE' and loc_before == '-':
         state = 'CREATE'
@@ -141,11 +141,24 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
         state = pred_state_seq[sent_i]
         location = pred_loc_seq[sent_i + 1]
 
+        #if 'D' is followed by a 'D'
+        if sent_i < num_sents - 1 and pred_state_seq[sent_i + 1] == 'D' and state == 'D':
+            state = 'E'
+
+        # if 'D' is followed by a 'M'
+        if sent_i < num_sents - 1 and pred_state_seq[sent_i + 1] == 'M' and state == 'D':
+            state = 'E'
+
+        # if 'E' is followed by a 'O_D'
+        if sent_i < num_sents - 1 and pred_state_seq[sent_i + 1] == 'O_D' and state in ['E', 'M']:
+            state = 'D'
+
+        # if 'C' is followed by a 'C'
+        if sent_i < num_sents - 1 and pred_state_seq[sent_i + 1] == 'C' and state == 'C':
+            state = 'O_C'
+
         # if the state before O_C is not O_C
-        if sent_i < num_sents-1 and pred_state_seq[sent_i+1] == 'O_C' and state != 'O_C':
-            print(para_id)
-            print(entity)
-            print(pred_state_seq)
+        if sent_i < num_sents - 1 and pred_state_seq[sent_i + 1] == 'O_C' and state != 'O_C':
             temp_idx = sent_i + 1
             while temp_idx != num_sents and pred_state_seq[temp_idx] in ['O_C', 'O_D']:
                 temp_idx += 1
@@ -162,17 +175,8 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
                 for idx in range(sent_i+1, temp_idx):
                     pred_state_seq[idx] = 'E'
 
-        # if the state after O_C is not C
-        if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state == 'M':
-            print(para_id)
-            print(entity)
-            print(pred_state_seq)
-            state = 'C'
-
-        if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state == 'E':
-            print(para_id)
-            print(entity)
-            print(pred_state_seq)
+        # if 'O_C' is followed by a 'E'
+        if sent_i > 0 and consist_state_seq[sent_i - 1] == 'O_C' and state == 'E':
             temp_idx = sent_i + 1
             while temp_idx != num_sents and pred_state_seq[temp_idx] == 'E':
                 temp_idx += 1
@@ -184,10 +188,8 @@ def predict_consistent_loc(pred_state_seq: List[str], pred_loc_seq: List[str],
             else:
                 state = 'C'
 
-        if sent_i > 0 and pred_state_seq[sent_i-1] == 'O_C' and state == 'D' :
-            print(para_id)
-            print(entity)
-            print(pred_state_seq)
+        # if 'O_C' is followed by a 'D'
+        if sent_i > 0 and consist_state_seq[sent_i - 1] == 'O_C' and state == 'D' :
             for idx in range(0, sent_i):
                 if pred_state_seq[idx] != 'O_C':
                     raise ValueError

@@ -124,9 +124,9 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
 
             fields = [str(para_id), str(step_i), entity_name, pred_state, gold_state, pred_loc, gold_loc, sentence_list[step_i]]
             if step_i > 0:
-                fields += [f'{state_attn:.2f}/{loc_attn:.2f}' if gold_loc_seq[step_i-1] >= 0 else f'{state_attn:.2f}/-'
+                fields += [f'{state_attn:.2f}/{loc_attn:.2f}' if gold_loc_seq[step_i] >= 0 else f'{state_attn:.2f}/-'
                            for state_attn, loc_attn in
-                           zip(state_attn_list[step_i-1], loc_attn_list[gold_loc_seq[step_i-1]][step_i-1])]
+                           zip(state_attn_list[step_i-1], loc_attn_list[gold_loc_seq[step_i]][step_i])]
 
             if pred_state == gold_state and step_i > 0:
                 correct_state += 1
