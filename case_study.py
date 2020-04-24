@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-batch_size', type=int, default=64)
 parser.add_argument('-plm_model_class', type=str, default='bert', help='pre-trained language model class')
 parser.add_argument('-plm_model_name', type=str, default='bert-base-uncased', help='pre-trained language model name')
-parser.add_argument('-hidden_size', type=int, default=128, help="hidden size of lstm")
+parser.add_argument('-hidden_size', type=int, default=256, help="hidden size of lstm")
 parser.add_argument('-dropout', type=float, default=0, help="dropout rate")
 
 parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
@@ -90,9 +90,14 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
     Reads the headers of prediction file from dummy_filepath and fill in the blanks with prediction.
     Prediction will be stored according to output_filepath.
     """
+    print_attn = False
+    if state_attn_log and loc_attn_log:
+        print_attn = True
+
     output_file = open(output_filepath, 'w', encoding='utf-8')
     columns = ['para_id', 'timestep', 'entity', 'state', 'gold_state', 'location', 'gold_location', 'sentence']
-    columns += [f'cpnet_{idx}' for idx in range(1, cpnet_cands + 1)]
+    if print_attn:
+        columns += [f'cpnet_{idx}' for idx in range(1, cpnet_cands + 1)]
     output_file.write('\t'.join(columns) + '\n\n')
     assert len(sentences) == len(output)
     total_instances = len(output)
@@ -104,9 +109,12 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
     for i in range(total_instances):
         instance = output[i]
         loc_cands = instance['loc_cands']
-        cpnet_triples = instance['cpnet']
-        cpnet_line = ['' for _ in range(8)] + cpnet_triples
-        output_file.write('\t'.join(cpnet_line) + '\n')
+        if print_attn:
+            cpnet_triples = instance['cpnet']
+            cpnet_line = ['' for _ in range(8)] + cpnet_triples
+            output_file.write('\t'.join(cpnet_line) + '\n')
+        else:
+            output_file.write('\n')
         sentence_list = sentences[i]
         sentence_list.insert(0, 'N/A')
 
@@ -114,8 +122,9 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
         entity_name = instance['entity']
         total_sents = instance['total_sents']
         gold_loc_seq = instance['gold_loc_seq']
-        state_attn_list = state_attn_log[i]
-        loc_attn_list = loc_attn_log[i]
+        if print_attn:
+            state_attn_list = state_attn_log[i]
+            loc_attn_list = loc_attn_log[i]
 
         correct_state, correct_loc = 0, 0
 
@@ -123,7 +132,7 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
             pred_state, gold_state, pred_loc, gold_loc = instance['prediction'][step_i]
 
             fields = [str(para_id), str(step_i), entity_name, pred_state, gold_state, pred_loc, gold_loc, sentence_list[step_i]]
-            if step_i > 0:
+            if step_i > 0 and print_attn:
                 fields += [f'{state_attn:.2f}/{loc_attn:.2f}' if gold_loc_seq[step_i] >= 0 else f'{state_attn:.2f}/-'
                            for state_attn, loc_attn in
                            zip(state_attn_list[step_i-1], loc_attn_list[gold_loc_seq[step_i]][step_i])]
