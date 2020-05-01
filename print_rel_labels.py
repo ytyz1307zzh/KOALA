@@ -18,10 +18,12 @@ torch.set_printoptions(precision=3, edgeitems=6, sci_mode=False)
 parser = argparse.ArgumentParser()
 parser.add_argument('-dataset', type=str, default='data/test.json')
 parser.add_argument('-output', type=str, default='predict/rellabel_test.tsv')
-parser.add_argument('-cpnet', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
+parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
 parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
 parser.add_argument('-batch_size', type=int, default=64)
 opt = parser.parse_args()
+opt.cpnet_struc_input = False  # add this arg to circumvent errors
+opt.wiki_path = 'wiki/result/retrieval.json'  # add this arg to circumvent errors
 
 
 def get_output(metadata: Dict, state_rel_labels: List[List[int]], loc_rel_labels: List[List[int]],
@@ -84,7 +86,7 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
             fields = [str(para_id), str(step_i), entity_name, gold_state, gold_loc, sentence_list[step_i]]
             if step_i > 0:
                 fields += [f'{state_label} / {loc_label}' for state_label, loc_label in
-                           zip(state_rel_labels[step_i-1], loc_rel_labels[step_i-1])]
+                           zip(state_rel_labels[step_i-1], loc_rel_labels[step_i])]  # shift right to avoid location 0
 
             output_file.write('\t'.join(fields) + '\n')
 
@@ -93,8 +95,7 @@ def write_output(output: List[Dict], output_filepath: str, sentences: List[List[
 
 def main():
     plm_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    dataset = ProparaDataset(opt.dataset, cpnet_path=opt.cpnet, verbdict_path=opt.state_verb,
-                             tokenizer=plm_tokenizer, is_test=True)
+    dataset = ProparaDataset(opt.dataset, opt=opt, tokenizer=plm_tokenizer, is_test=True)
     data_batch = DataLoader(dataset=dataset, batch_size=opt.batch_size, shuffle=False, collate_fn=Collate())
 
     output_result = []
@@ -110,7 +111,7 @@ def main():
         loc_rel_labels = batch['loc_rel_labels']
         all_sentences.extend(batch['sentences'])
         cpnet_cands = len(cpnet_triples[0])
-        all_labels.append(state_rel_labels + loc_rel_labels)
+        all_labels.append(state_rel_labels + loc_rel_labels[:, 1:])  # get rid of location 0
 
         batch_size = len(cpnet_triples)
         for i in range(batch_size):
