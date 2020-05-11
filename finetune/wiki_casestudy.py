@@ -12,6 +12,7 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 from typing import List, Dict
+from collections import OrderedDict
 import os
 BERT_HIDDEN_SIZE = 768
 
@@ -45,48 +46,47 @@ def find_topk_words(text: str, pos: List[int]):
     if opt.cuda:
         input_ids = input_ids.cuda()
 
-    pretrain_embed = pretrain_model(input_ids)[0].squeeze()
-    finetune_embed = finetune_model(input_ids)[0].squeeze()
+    pretrain_all_embed = pretrain_model(input_ids)[0].squeeze()
+    finetune_all_embed = finetune_model(input_ids)[0].squeeze()
 
-    pretrain_embed = pretrain_embed[pos]
-    finetune_embed = finetune_embed[pos]  # (num_token, embed_size)
-    tokens = tokenizer.convert_ids_to_tokens(input_ids[0][pos])
+    pretrain_nv_embed = pretrain_all_embed[pos]
+    finetune_nv_embed = finetune_all_embed[pos]  # (num_token, embed_size)
+    all_tokens = tokenizer.convert_ids_to_tokens(input_ids[0])
+    nv_tokens = tokenizer.convert_ids_to_tokens(input_ids[0][pos])
 
-    assert pretrain_embed.size(0) == finetune_embed.size(0) == len(tokens)
+    assert pretrain_nv_embed.size(0) == finetune_nv_embed.size(0) == len(nv_tokens)
     result = []
-    for tid in range(len(tokens)):
-        word = tokens[tid]
+    for tid in range(len(nv_tokens)):
+        word = nv_tokens[tid]
 
         # on pre-trained BERT
-        embed = pretrain_embed[tid]
-        word_list = []
-        for oid in range(len(tokens)):
-            if tid == oid:
+        embed = pretrain_nv_embed[tid]
+        word_dict = {}
+        for oid in range(input_ids.size(-1)):
+            other_word = all_tokens[oid]
+            if other_word == word or other_word in word_dict.keys():
                 continue
-            other_embed = pretrain_embed[oid]
-            other_word = tokens[oid]
+            other_embed = pretrain_all_embed[oid]
             sim = cos_similarity(embed, other_embed)
-            word_list.append({'token': other_word,
-                              'similarity': sim.item()})
-        word_list = sorted(word_list, key=lambda d: d['similarity'], reverse=True)
-        pretrain_topk = word_list[:opt.topk]
+            word_dict[other_word] = sim.item()
+        word_dict = OrderedDict(sorted(word_dict.items(), key=lambda d: d[1], reverse=True))  # sort by similarity
+        pretrain_topk = list(word_dict.items())[:opt.topk]
 
         # on fine-tuned BERT
-        embed = finetune_embed[tid]
-        word_list = []
-        for oid in range(len(tokens)):
-            if tid == oid:
+        embed = finetune_nv_embed[tid]
+        word_dict = {}
+        for oid in range(input_ids.size(-1)):
+            other_word = all_tokens[oid]
+            if other_word == word or other_word in word_dict.keys():
                 continue
-            other_embed = finetune_embed[oid]
-            other_word = tokens[oid]
+            other_embed = finetune_all_embed[oid]
             sim = cos_similarity(embed, other_embed)
-            word_list.append({'token': other_word,
-                              'similarity': sim.item()})
-        word_list = sorted(word_list, key=lambda d: d['similarity'], reverse=True)
-        finetune_topk = word_list[:opt.topk]
+            word_dict[other_word] = sim.item()
+        word_dict = OrderedDict(sorted(word_dict.items(), key=lambda d: d[1], reverse=True))  # sort by similarity
+        finetune_topk = list(word_dict.items())[:opt.topk]
         result.append({'token': word,
-                       'pretrain': pretrain_topk,
-                       'finetune': finetune_topk})
+                       'pretrain': {word: score for word, score in pretrain_topk},
+                       'finetune': {word: score for word, score in finetune_topk}})
 
     return result
 
@@ -103,7 +103,7 @@ def main():
     assert len(text_list) == len(pos_list)
     result = []
 
-    for i in range(len(text_list)):
+    for i in tqdm(range(len(text_list))):
         scores = find_topk_words(text_list[i], pos_list[i])
         result.append({'id': i,
                        'paragraph': text_list[i],
