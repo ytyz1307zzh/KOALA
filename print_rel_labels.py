@@ -3,6 +3,8 @@
  @Author: Zhihan Zhang
  @mail  : zhangzhihan@pku.edu.cn
  @homepage: ytyz1307zzh.github.io
+ Print the relevance labels of knowledge triples in each instance
+ used in attention loss and store in a TSV file.
 '''
 
 import argparse

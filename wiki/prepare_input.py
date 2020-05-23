@@ -3,6 +3,7 @@
  @Author: Zhihan Zhang
  @mail  : zhangzhihan@pku.edu.cn
  @homepage: ytyz1307zzh.github.io
+ Prepare input instances for retrieve_para.py
 '''
 import argparse
 import json
@@ -10,7 +11,8 @@ from tqdm import tqdm
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-input', type=str, default='../ConceptNet/rough_retrieval.json',
-                    help='data file that contain data instances for each entity')
+                    help='data file that contain data instances for all datasets, e.g.,'
+                         'ConceptNet retrieval file')
 parser.add_argument('-output', type=str, default='./wiki_query.json')
 opt = parser.parse_args()
 

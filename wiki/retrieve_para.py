@@ -60,29 +60,10 @@ def fetch_text(doc_id):
     return PROCESS_DB.get_doc_text(doc_id)
 
 
-def has_answer(answer: str, para_text: str, tokenizer):
-    """
-    Check if a document contains an answer string.
-    """
-    text = tokenizer.tokenize(para_text).words(uncased=True)
-    answer_list = answer.split(';')
-
-    for single_answer in answer_list:
-
-        single_answer = single_answer.strip().lower()
-        single_answer = utils.normalize(single_answer)
-        single_answer = tokenizer.tokenize(single_answer)
-        single_answer = single_answer.words(uncased=True)
-
-        for i in range(0, len(text) - len(single_answer) + 1):
-            if single_answer == text[i: i + len(single_answer)]:
-                return True
-
-    return False
-
-
 def _split_doc(doc: str):
-    """Given a doc, split it into chunks (by paragraph)."""
+    """
+    Given a doc, split it into paragraphs.
+    """
     curr = []
     curr_len = 0
     for split in regex.split(r'\n+', doc):
@@ -98,25 +79,6 @@ def _split_doc(doc: str):
         curr_len += len(split)
     if len(curr) > 0:
         yield ' '.join(curr)
-
-
-def split_doc2sent(docs: List[str]) -> (List[str], List[List[int]]):
-    """
-    Split and flatten documents. Maintain a mapping from doc (index in
-    flat list) to split (index in flat list).
-    didx2sidx: List[doc_idx -> [split_idx_start, split_idx_end]]
-    """
-    flat_splits = []
-    didx2sidx = []
-
-    for doc in docs:
-        splits = sent_tokenize(doc)
-        splits = list(map(lambda x: re.sub(r'\n+', ' ', x.strip()), splits))
-        didx2sidx.append([len(flat_splits), -1])
-        flat_splits.extend(splits)
-        didx2sidx[-1][1] = len(flat_splits)
-
-    return flat_splits, didx2sidx
 
 
 class ConvertData2ParagraphClsInput(object):
@@ -168,9 +130,10 @@ class ConvertData2ParagraphClsInput(object):
         return data_examples
 
 
-    def process(self, query, n_docs=5,
-                return_context=False):
-        """Run a single query."""
+    def process(self, query, n_docs=5):
+        """
+        Run a single query.
+        """
         para_examples = self.process_batch(
             [query], n_docs=n_docs
         )
@@ -178,7 +141,10 @@ class ConvertData2ParagraphClsInput(object):
 
 
     def process_batch(self, examples, n_docs=5):
-        """Run a batch of queries' paragraphs (more efficient)."""
+        """
+        Run a batch of queries' paragraphs (more efficient).
+        """
+
         t0 = time.time()
         paragraphs = [example['paragraph'] for example in examples]
         prompts = [example['prompt'] for example in examples]
@@ -254,6 +220,9 @@ class ConvertData2ParagraphClsInput(object):
 
 
     def convert(self, data_file: str, output: str):
+        """
+        Convert input instances to retrieved wiki paragraphs
+        """
         para_examples = []
         data_num = 0
         data_examples  = self.read_input(data_file=data_file)
@@ -347,7 +316,7 @@ class ConvertWikiPage2Paragraph(object):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-data_file', required=True, help='data file to convert to paras for classification.')
+    parser.add_argument('-data_file', required=True, help='structura')
     parser.add_argument('-ret_path', required=True, help='retriver model path')
     parser.add_argument('-db_path', required=True, help='data base path')
     parser.add_argument('-output', required=True, help='output path')
