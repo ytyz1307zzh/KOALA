@@ -1,11 +1,11 @@
 # KOALA
-Pytorch implementation of **K**n**O**wledge-**A**ware procedura**L** text underst**A**nding model on ProPara dataset. Built on the previous state-of-the-art model [NCET][aclweb.org/anthology/W19-1502/], the KOALA model integrates commonsense knowledge from ConceptNet and is trained in a multi-stage training schema. The model achieves 70.4 F1 on the test set on ProPara dataset, a benchmark dataset of procedural text understanding.
+Pytorch implementation of **K**n**O**wledge-**A**ware procedura**L** text underst**A**nding model on ProPara dataset. Built on the previous state-of-the-art model [NCET](aclweb.org/anthology/W19-1502/), the KOALA model integrates commonsense knowledge from ConceptNet and is trained in a multi-stage training schema. The model achieves 70.4 F1 on the test set on ProPara dataset, a benchmark dataset of procedural text understanding.
 
 ## Data
 
 KOALA uses the [ProPara dataset](http://data.allenai.org/propara/) proposed by AI2. This dataset is about a reading comprehension task on procedural text, *i.e.*, a text paragraph that describes a natural process (*e.g.*, photosynthesis, evaporation, etc.). AI models are required to read the paragraph, then predict the state changes (CREATE, MOVE, DESTROY or NONE) as well as the locations of the given entities.
 
-<img src="D:/Code/ICPC/image/propara.png" alt="image-20191223140902073" width=500 />
+<img src="./image/propara.png" alt="image-20191223140902073" width=500 />
 
 AI2 released the dataset [here](https://docs.google.com/spreadsheets/d/1x5Ct8EmQs2hVKOYX7b2nS0AOoQi4iM7H9d9isXRDwgM/edit#gid=832930347) in the form of Google Spreadsheet. We need three files to run the KOALA model, *i.e.*, the Paragraphs file for the raw text, the Train/Dev/Test file for the dataset split, and the State_change_annotations file for the annotated entities and their locations. I also provide a copy in `data/` directory which is identical to the official release.
 
@@ -44,7 +44,9 @@ AI2 released the dataset [here](https://docs.google.com/spreadsheets/d/1x5Ct8EmQ
 3. Train a KOALA model:
 
    ```bash
-   python train.py -mode train -ckpt_dir ckpt -train_set data/train.json -dev_set data/dev.json -cpnet_path CPNET_PATH -cpnet_plm_path CPNET_PLM_PATH -cpnet_struc_input -state_verb STATE_VERB_PATH -wiki_plm_path WIKI_PLM_PATH -finetune
+   python train.py -mode train -ckpt_dir ckpt -train_set data/train.json -dev_set data/dev.json\
+   -cpnet_path CPNET_PATH -cpnet_plm_path CPNET_PLM_PATH -cpnet_struc_input -state_verb STATE_VERB_PATH\
+   -wiki_plm_path WIKI_PLM_PATH -finetune
    ```
 
    where `-ckpt_dir` denotes the directory where checkpoints will be stored.
@@ -75,7 +77,9 @@ AI2 released the dataset [here](https://docs.google.com/spreadsheets/d/1x5Ct8EmQ
 4. Predict on test set using a trained model:
 
    ```bash
-   python -u train.py -mode test -test_set data/test.json -dummy_test data/dummy-predictions.tsv -output predict/prediction.tsv -cpnet_path CPNET_PATH -cpnet_plm_path CPNET_PLM_PATH -cpnet_struc_input -state_verb STATE_VERB_PATH -wiki_plm_path WIKI_PLM_PATH -restore ckpt/best_checkpoint.pt
+   python -u train.py -mode test -test_set data/test.json -dummy_test data/dummy-predictions.tsv\
+   -output predict/prediction.tsv -cpnet_path CPNET_PATH -cpnet_plm_path CPNET_PLM_PATH\
+   -cpnet_struc_input -state_verb STATE_VERB_PATH -wiki_plm_path WIKI_PLM_PATH -restore ckpt/best_checkpoint.pt
    ```
 
    where -output is a TSV file that will contain the prediction results, and -dummy_test is the output template to simplify output formatting. The `dummy-predictions.tsv` file is provided by the [official evaluation script](https://github.com/allenai/aristo-leaderboard/tree/master/propara/data/test) of AI2, and I just copied it to `data/`.
@@ -100,20 +104,27 @@ To reproduce the 70.4 result on the ProPara test set, you may:
 
 2. I have uploaded my retrieved ConceptNet knowledge triples, as well as the co-appearance verb set of entity states in `ConceptNet/result/`.
 
-3. I have uploaded my fine-tuned knowledge encoder on ConceptNet and the fine-tuned text encoder on Wiki paragraphs [here][].
+3. I have uploaded my fine-tuned knowledge encoder on ConceptNet and the fine-tuned text encoder on Wiki paragraphs [here]().
 
 4. Using the aforementioned input files, you will be able to reproduce the results using the following training and testing commands:
 
    Training:
 
    ```bash
-   python -u train.py -mode train -epoch 20 -impatience -1 -save_mode best -ckpt_dir ckpt -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -wiki_plm_path MY_WIKI_PLM_MODEL -finetune -hidden_size 256 -attn_loss 0.5 -loc_loss 0.3 -per_gpu_batch_size 32 -lr 3e-5 -dropout 0.4
+   python -u train.py -mode train -epoch 20 -impatience -1 -save_mode best\
+   -ckpt_dir ckpt -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input\
+   -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -wiki_plm_path MY_WIKI_PLM_MODEL\
+   -finetune -hidden_size 256 -attn_loss 0.5 -loc_loss 0.3 -per_gpu_batch_size 32\
+   -lr 3e-5 -dropout 0.4
    ```
 
    Testing:
 
    ```bash
-   python -u train.py -mode test -dummy_test data/dummy-predictions.tsv -output data/prediction.tsv -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -wiki_plm_path MY_WIKI_PLM_MODEL -hidden_size 256 -per_gpu_batch_size 32 -restore ckpt/best_checkpoint.pt
+   python -u train.py -mode test -dummy_test data/dummy-predictions.tsv\
+   -output data/prediction.tsv -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input\
+   -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -wiki_plm_path MY_WIKI_PLM_MODEL\
+   -hidden_size 256 -per_gpu_batch_size 32 -restore ckpt/best_checkpoint.pt
    ```
 
    
