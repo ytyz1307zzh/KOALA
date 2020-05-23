@@ -237,6 +237,10 @@ def remove_stopword(paragraph: str) -> Set[str]:
 
 
 def find_relevant_triple(gold_loc_seq: List[str], gold_state_seq: List[str], verb_dict: Dict, cpnet_triples: List[str]):
+    """
+    Find relevant triples for computing attention loss.
+    Two categories: state-relevant and location-relevant
+    """
 
     assert len(gold_state_seq) == len(gold_loc_seq) - 1
     state_rel_labels, loc_rel_labels = [], []

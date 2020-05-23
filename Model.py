@@ -149,11 +149,9 @@ class KOALA(nn.Module):
         correct_loc_pred, total_loc_pred = compute_loc_accuracy(logits = masked_loc_logits, gold = masked_gold_loc_seq,
                                                                 pad_value = PAD_LOC)
 
-        gold_loc_mask = self.get_gold_loc_mask(loc_mask, gold_loc_seq)
         if loc_attn_probs is not None:
             loc_attn_probs = self.get_gold_attn_probs(loc_attn_probs, gold_loc_seq)
-        attn_loss, total_attn_pred = self.get_attn_loss(state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels,
-                                                        entity_mask, gold_loc_mask)
+        attn_loss, total_attn_pred = self.get_attn_loss(state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels)
 
         if self.is_test:  # inference
             pred_loc_seq = get_pred_loc(loc_logits = masked_loc_logits, gold_loc_seq = gold_loc_seq)
@@ -163,18 +161,12 @@ class KOALA(nn.Module):
                correct_loc_pred, total_loc_pred, total_attn_pred
 
 
-    def get_attn_loss(self, state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels,
-                      entity_mask, gold_loc_mask):
+    def get_attn_loss(self, state_attn_probs, loc_attn_probs, state_rel_labels, loc_rel_labels):
         """
-        Compute attention loss.
+        Compute attention loss. state_attn_probs or loc_attn_probs can be None if ConceptNet
+        is not applied to both state and location predictors.
         All inputs: (batch, max_sents, max_cpnet)
-        *_mask: (batch, max_sents, max_tokens)
         """
-        # discard thos timesteps that are masked
-        # state_sent_mask = torch.sum(entity_mask, dim=-1, keepdim=True)
-        # loc_sent_mask = torch.sum(entity_mask, dim=-1, keepdim=True) + torch.sum(gold_loc_mask, dim=-1, keepdim=True)
-        # state_rel_labels = state_rel_labels.masked_fill(mask=(state_sent_mask == 0), value=0)
-        # loc_rel_labels = loc_rel_labels.masked_fill(mask=(loc_sent_mask == 0), value=0)
 
         pos_attn_probs = None
         if state_attn_probs is not None:
@@ -200,6 +192,10 @@ class KOALA(nn.Module):
 
 
     def get_gold_attn_probs(self, loc_attn_probs, gold_loc_seq):
+        """
+        Get the attention weights of ConceptNet triples with the gold location, among all location candidates.
+        Pick arbitrary one if no gold location at this timestep.
+        """
         batch_size = gold_loc_seq.size(0)
         max_sents = gold_loc_seq.size(1)
         max_cpnet = loc_attn_probs.size(-1)
@@ -212,21 +208,6 @@ class KOALA(nn.Module):
 
         gold_attn_probs = torch.stack(gold_attn_probs, dim=0)
         return gold_attn_probs.view(batch_size, max_sents, max_cpnet)
-
-
-    def get_gold_loc_mask(self, loc_mask, gold_loc_seq):
-        batch_size = gold_loc_seq.size(0)
-        max_sents = gold_loc_seq.size(1)
-        max_tokens = loc_mask.size(-1)
-        pick_loc_seq = gold_loc_seq.masked_fill(mask=(gold_loc_seq < 0), value=0)
-        gold_loc_mask = []
-
-        for i in range(batch_size):
-            for j in range(max_sents):
-                gold_loc_mask.append(loc_mask[i][pick_loc_seq[i][j] - 1][j])  # loc_mask does not include unk
-
-        gold_loc_mask = torch.stack(gold_loc_mask, dim=0)
-        return gold_loc_mask.view(batch_size, max_sents, max_tokens)
 
 
     def mask_loc_logits(self, loc_logits, num_cands: torch.IntTensor):
@@ -402,7 +383,7 @@ class LocationPredictor(nn.Module):
         self.cpnet_inject = opt.cpnet_inject
         unk_vec = torch.empty(2 * opt.hidden_size)
         nn.init.uniform_(unk_vec, -math.sqrt(1 / opt.hidden_size), math.sqrt(1 / opt.hidden_size))
-        self.unk_vec = nn.Parameter(unk_vec, requires_grad=True)
+        self.unk_vec = nn.Parameter(unk_vec, requires_grad=True)  # learnable vector for '?' location
 
 
     def forward(self, encoder_out, entity_mask, loc_mask, sentence_mask, cpnet_triples, cpnet_rep):

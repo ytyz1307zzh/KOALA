@@ -41,6 +41,9 @@ class ProparaDataset(torch.utils.data.Dataset):
 
 
     def read_cpnet(self, cpnet_path: str):
+        """
+        Read the retrieved ConceptNet triples for each instance.
+        """
         cpnet = json.load(open(cpnet_path, 'r', encoding='utf-8'))
         cpnet_dict = {}
 
@@ -80,6 +83,9 @@ class ProparaDataset(torch.utils.data.Dataset):
 
 
     def convert_wordmask_to_subwordmask(self, mask, offset_map):
+        """
+        Map the word indices in 'mask' to subword indices
+        """
         num_subword = len(offset_map)
         return [1 if mask[offset_map[i]] == 1 else 0 for i in range(num_subword)]
 

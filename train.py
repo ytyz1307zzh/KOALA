@@ -53,6 +53,7 @@ parser.add_argument('-impatience', type=int, default=20,
 parser.add_argument('-report', type=int, default=2, help="report frequence per epoch, should be at least 1")
 parser.add_argument('-train_set', type=str, default="data/train.json", help="path to training set")
 parser.add_argument('-dev_set', type=str, default="data/dev.json", help="path to dev set")
+parser.add_argument('-no_cuda', action='store_true', default=False, help="if true, will only use cpu")
 
 # test parameters
 parser.add_argument('-test_set', type=str, default="data/test.json", help="path to test set")
@@ -76,10 +77,6 @@ parser.add_argument('-wiki_plm_path', type=str, default=None,
 parser.add_argument('-finetune', action='store_true', default=False, help='if true, fine-tune the bert encoder')
 parser.add_argument('-no_wiki', action='store_true', default=False, help='if true, use the vanilla PLM from huggingface')
 
-# other parameters
-parser.add_argument('-debug', action='store_true', default=False, help="enable debug mode, change data files to debug data")
-parser.add_argument('-no_cuda', action='store_true', default=False, help="if true, will only use cpu")
-
 opt = parser.parse_args()
 
 try:
@@ -99,6 +96,7 @@ plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 
 if opt.ckpt_dir and not os.path.exists(opt.ckpt_dir):
     os.mkdir(opt.ckpt_dir)
+# prepare logger
 if opt.ckpt_dir:
     log_path = os.path.join(opt.ckpt_dir, 'train.log')
     if os.path.exists(log_path):
@@ -154,18 +152,9 @@ def train():
         tb_writer = SummaryWriter()
 
     train_set = ProparaDataset(opt.train_set, opt=opt, tokenizer=plm_tokenizer, is_test=False)
-    shuffle_train = True
-    if opt.debug:
-        print('*'*20 + '[INFO] Debug mode enabled. Switch training set to debug.json' + '*'*20)
-        train_set = ProparaDataset('data/debug.json', opt=opt, tokenizer=plm_tokenizer, is_test=False)
-        shuffle_train = False
 
-    train_batch = DataLoader(dataset=train_set, batch_size=opt.batch_size, shuffle=shuffle_train, collate_fn=Collate())
+    train_batch = DataLoader(dataset=train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=Collate())
     dev_set = ProparaDataset(opt.dev_set, opt=opt, tokenizer=plm_tokenizer, is_test=False)
-
-    if opt.debug:
-        print('*'*20 + '[INFO] Debug mode enabled. Switch dev set to debug.json' + '*'*20)
-        dev_set = ProparaDataset('data/debug.json', opt=opt, tokenizer=plm_tokenizer, is_test=False)
 
     model = KOALA(opt = opt, is_test = False)
     if not opt.no_cuda:
@@ -216,9 +205,6 @@ def train():
                                        grad_accum_step = opt.grad_accum_step)  # when to report results
 
         for batch in train_batch:
-            # with open('logs/debug.log', 'w', encoding='utf-8') as debug_file:
-            #     torch.set_printoptions(threshold=np.inf)
-            #     print(batch, file = debug_file)
 
             paragraphs = batch['paragraph']
             token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
@@ -280,6 +266,7 @@ def train():
                 report_attn_pred += train_attn_pred
             batch_cnt += 1
 
+            # gradient accumulation
             if batch_cnt % opt.grad_accum_step == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), opt.max_grad_norm)
                 optimizer.step()
@@ -546,18 +533,10 @@ if __name__ == "__main__":
         if not opt.output.endswith('.tsv'):
             print("[WARNING] The output will be in TSV format, while the specified output file does not have .tsv suffix.")
 
-        if opt.debug:
-            print('*' * 20 + '[INFO] Debug mode enabled. Switch dummy file to data/dummy-debug.json' + '*' * 20)
-            opt.dummy_test = 'data/dummy-debug.tsv'
-
         plm_model_class, plm_tokenizer_class, plm_config_class = MODEL_CLASSES[opt.plm_model_class]
         plm_tokenizer = plm_tokenizer_class.from_pretrained(opt.plm_model_name)
 
         test_set = ProparaDataset(opt.test_set, opt=opt, tokenizer=plm_tokenizer, is_test=True)
-
-        if opt.debug:
-            print('*' * 20 + '[INFO] Debug mode enabled. Switch test set to debug.json' + '*' * 20)
-            test_set = ProparaDataset('data/debug.json', opt=opt, tokenizer=plm_tokenizer, is_test=True)
 
         print('[INFO] Start loading trained model...')
         restore_start_time = time.time()
