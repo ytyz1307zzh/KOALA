@@ -1,6 +1,6 @@
 # ConceptNet Retrieval
 
-The original ConceptNet knowledge base is stored in csv format, which is provided [here][https://github.com/commonsense/conceptnet5/wiki/Downloads].
+The original ConceptNet knowledge base is stored in csv format, which is provided [here](https://github.com/commonsense/conceptnet5/wiki/Downloads).
 
 1. Obtain the English subgraph: the original ConceptNet is multi-lingual, so we only keep the English triples. This means both the subject and the object contain only English letters. 
 
