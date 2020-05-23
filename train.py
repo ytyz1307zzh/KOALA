@@ -43,34 +43,38 @@ parser.add_argument('-grad_accum_step', default=1, type=int, help='gradient accu
 
 # training parameters
 parser.add_argument('-mode', type=str, choices=['train', 'test'], default='train', help="train or test")
-parser.add_argument('-ckpt_dir', type=str, default=None, help="checkpoint directory")
+parser.add_argument('-ckpt_dir', type=str, default=None, help="directory to save checkpoints and logs")
 parser.add_argument('-save_mode', type=str, choices=['best', 'all', 'none', 'last', 'best-last'], default='best',
                     help="best (default): save checkpoints when reaching new best score; all: save all checkpoints; "
                          "none: don't save; best-last: save both the best and the last checkpoint")
 parser.add_argument('-epoch', type=int, default=100, help="number of epochs, use -1 to rely on early stopping only")
-parser.add_argument('-impatience', type=int, default=20, help='number of evaluation rounds for early stopping, use -1 to disable early stopping')
+parser.add_argument('-impatience', type=int, default=20,
+                    help='number of evaluation rounds for early stopping, use -1 to disable early stopping')
 parser.add_argument('-report', type=int, default=2, help="report frequence per epoch, should be at least 1")
 parser.add_argument('-train_set', type=str, default="data/train.json", help="path to training set")
 parser.add_argument('-dev_set', type=str, default="data/dev.json", help="path to dev set")
 
 # test parameters
 parser.add_argument('-test_set', type=str, default="data/test.json", help="path to test set")
-parser.add_argument('-restore', type=str, default=None, help="restoring model path")
-parser.add_argument('-dummy_test', type=str, default="data/dummy-predictions.tsv", help="path to dummy prediction file")
+parser.add_argument('-restore', type=str, default=None, help="path to saved checkpoint")
+parser.add_argument('-dummy_test', type=str, default="data/dummy-predictions.tsv", help="path to prediction file template")
 parser.add_argument('-output', type=str, default=None, help="path to store prediction outputs")
 
 # commonsense parameters
-parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json", help="path to conceptnet triples")
-parser.add_argument('-cpnet_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
+parser.add_argument('-cpnet_path', type=str, default="ConceptNet/result/retrieval.json",
+                    help="path to the retrieved ConceptNet knowledge triples")
+parser.add_argument('-cpnet_plm_path', type=str, default=None,
+                    help='specify to use pre-fine-tuned knowledge encoder on ConceptNet triples')
 parser.add_argument('-cpnet_struc_input', action='store_true', default=False,
-                    help='specify to use structural input format for ConceptNet triples')
-parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
+                    help='if true, use structural input format for ConceptNet triples')
+parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json',
+                    help='path to co-appearance verb set of entity states')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
-                    help='where to inject ConceptNet commonsense')
-parser.add_argument('-wiki_path', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
-parser.add_argument('-embed_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
-parser.add_argument('-finetune', action='store_true', default=False, help='whether to fine-tune the bert encoder')
-parser.add_argument('-no_wiki', action='store_true', default=False, help='specify to exclude wiki')
+                    help='where to inject ConceptNet commonsense, select "none" to avoid infusing ConceptNet')
+parser.add_argument('-embed_plm_path', type=str, default=None,
+                    help='specify to use pre-fine-tuned text encoder on Wiki paragraphs')
+parser.add_argument('-finetune', action='store_true', default=False, help='if true, fine-tune the bert encoder')
+parser.add_argument('-no_wiki', action='store_true', default=False, help='if true, use the vanilla PLM from huggingface')
 
 # other parameters
 parser.add_argument('-debug', action='store_true', default=False, help="enable debug mode, change data files to debug data")
@@ -217,16 +221,8 @@ def train():
             #     print(batch, file = debug_file)
 
             paragraphs = batch['paragraph']
-            wiki = batch['wiki']
-            if not opt.no_wiki and not opt.embed_plm_path:
-                token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
-                                                                    paragraphs=paragraphs,
-                                                                    wiki=wiki)
-            else:
-                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
-                                                            return_tensors='pt')['input_ids']
-                token_type_ids = None
-
+            token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                        return_tensors='pt')['input_ids']
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -241,8 +237,6 @@ def train():
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
-                if token_type_ids is not None:
-                    token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -253,17 +247,10 @@ def train():
                 loc_rel_labels = loc_rel_labels.cuda()
                 num_cands = num_cands.cuda()
 
-            if batch_cnt == 0 or batch_cnt in report_batch:
-                print_hidden = True
-            else:
-                print_hidden = False
-
-            train_result = model(token_ids = token_ids, token_type_ids = token_type_ids,
-                                 entity_mask = entity_mask, verb_mask = verb_mask,
+            train_result = model(token_ids = token_ids, entity_mask = entity_mask, verb_mask = verb_mask,
                                  loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
                                  num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
-                                 state_rel_labels = state_rel_labels, loc_rel_labels = loc_rel_labels,
-                                 print_hidden = print_hidden)
+                                 state_rel_labels = state_rel_labels, loc_rel_labels = loc_rel_labels)
 
             train_state_loss, train_loc_loss, train_attn_loss, train_state_correct,\
             train_state_pred, train_loc_correct, train_loc_pred, train_attn_pred = train_result
@@ -385,16 +372,8 @@ def evaluate(dev_set, model, tb_writer, report_cnt: int):
         for batch in dev_batch:
 
             paragraphs = batch['paragraph']
-            wiki = batch['wiki']
-            if not opt.no_wiki and not opt.embed_plm_path:
-                token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
-                                                                    paragraphs=paragraphs,
-                                                                    wiki=wiki)
-            else:
-                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
-                                                            return_tensors='pt')['input_ids']
-                token_type_ids = None
-
+            token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                        return_tensors='pt')['input_ids']
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
             verb_mask = batch['verb_mask']
@@ -409,8 +388,6 @@ def evaluate(dev_set, model, tb_writer, report_cnt: int):
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
-                if token_type_ids is not None:
-                    token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -421,17 +398,10 @@ def evaluate(dev_set, model, tb_writer, report_cnt: int):
                 loc_rel_labels = loc_rel_labels.cuda()
                 num_cands = num_cands.cuda()
 
-            if batch_cnt == 0:
-                print_hidden = True
-            else:
-                print_hidden = False
-
-            eval_result = model(token_ids = token_ids, token_type_ids = token_type_ids,
-                                entity_mask = entity_mask, verb_mask = verb_mask,
+            eval_result = model(token_ids = token_ids, entity_mask = entity_mask, verb_mask = verb_mask,
                                 loc_mask = loc_mask, gold_loc_seq = gold_loc_seq, gold_state_seq = gold_state_seq,
                                 num_cands = num_cands, sentence_mask = sentence_mask, cpnet_triples = cpnet_triples,
-                                state_rel_labels = state_rel_labels, loc_rel_labels = loc_rel_labels,
-                                print_hidden = print_hidden)
+                                state_rel_labels = state_rel_labels, loc_rel_labels = loc_rel_labels)
 
             eval_state_loss, eval_loc_loss, eval_attn_loss, eval_state_correct,\
             eval_state_pred, eval_loc_correct, eval_loc_pred, eval_attn_pred = eval_result
@@ -497,15 +467,8 @@ def test(test_set, model):
         for batch in test_batch:
 
             paragraphs = batch['paragraph']
-            wiki = batch['wiki']
-            if not opt.no_wiki and not opt.embed_plm_path:
-                token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
-                                                                    paragraphs=paragraphs,
-                                                                    wiki=wiki)
-            else:
-                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
-                                                            return_tensors='pt')['input_ids']
-                token_type_ids = None
+            token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                        return_tensors='pt')['input_ids']
 
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
@@ -521,8 +484,6 @@ def test(test_set, model):
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
-                if token_type_ids is not None:
-                    token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -533,16 +494,10 @@ def test(test_set, model):
                 loc_rel_labels = loc_rel_labels.cuda()
                 num_cands = num_cands.cuda()
 
-            if batch_cnt == 0:
-                print_hidden = True
-            else:
-                print_hidden = False
-
-            test_result = model(token_ids=token_ids, token_type_ids=token_type_ids,
-                                entity_mask=entity_mask, verb_mask=verb_mask,
+            test_result = model(token_ids=token_ids, entity_mask=entity_mask, verb_mask=verb_mask,
                                 loc_mask=loc_mask, gold_loc_seq=gold_loc_seq, gold_state_seq=gold_state_seq,
                                 num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples,
-                                state_rel_labels=state_rel_labels, loc_rel_labels=loc_rel_labels, print_hidden=print_hidden)
+                                state_rel_labels=state_rel_labels, loc_rel_labels=loc_rel_labels)
 
             pred_state_seq, pred_loc_seq, test_state_correct, test_state_pred,\
                 test_loc_correct, test_loc_pred = test_result

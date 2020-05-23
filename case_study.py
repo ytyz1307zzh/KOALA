@@ -34,7 +34,6 @@ parser.add_argument('-cpnet_struc_input', action='store_true', default=False,
 parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
-parser.add_argument('-wiki_path', type=str, default="wiki/result/retrieval.json", help="path to wiki paragraphs")
 parser.add_argument('-embed_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
 parser.add_argument('-no_wiki', action='store_true', default=False, help='specify to exclude wiki')
 
@@ -181,16 +180,8 @@ def test(test_set, model):
         for batch in test_batch:
 
             paragraphs = batch['paragraph']
-            wiki = batch['wiki']
-            if not opt.no_wiki and not opt.embed_plm_path:
-                token_ids, token_type_ids = prepare_input_text_pair(tokenizer=plm_tokenizer,
-                                                                    paragraphs=paragraphs,
-                                                                    wiki=wiki)
-            else:
-                token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
-                                                            return_tensors='pt')['input_ids']
-                token_type_ids = None
-
+            token_ids = plm_tokenizer.batch_encode_plus(paragraphs, add_special_tokens=True,
+                                                        return_tensors='pt')['input_ids']
             all_sentences.extend(batch['sentences'])
             sentence_mask = batch['sentence_mask']
             entity_mask = batch['entity_mask']
@@ -207,8 +198,6 @@ def test(test_set, model):
 
             if not opt.no_cuda:
                 token_ids = token_ids.cuda()
-                if token_type_ids is not None:
-                    token_type_ids = token_type_ids.cuda()
                 sentence_mask = sentence_mask.cuda()
                 entity_mask = entity_mask.cuda()
                 verb_mask = verb_mask.cuda()
@@ -219,12 +208,10 @@ def test(test_set, model):
                 loc_rel_labels = loc_rel_labels.cuda()
                 num_cands = num_cands.cuda()
 
-            test_result = model(token_ids=token_ids, token_type_ids=token_type_ids,
-                                entity_mask=entity_mask, verb_mask=verb_mask,
+            test_result = model(token_ids=token_ids, entity_mask=entity_mask, verb_mask=verb_mask,
                                 loc_mask=loc_mask, gold_loc_seq=gold_loc_seq, gold_state_seq=gold_state_seq,
                                 num_cands=num_cands, sentence_mask=sentence_mask, cpnet_triples=cpnet_triples,
-                                state_rel_labels=state_rel_labels, loc_rel_labels=loc_rel_labels,
-                                print_hidden=False)
+                                state_rel_labels=state_rel_labels, loc_rel_labels=loc_rel_labels)
 
             pred_state_seq, pred_loc_seq, test_state_correct, test_state_pred,\
                 test_loc_correct, test_loc_pred = test_result
