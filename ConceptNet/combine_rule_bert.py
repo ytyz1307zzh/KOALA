@@ -15,6 +15,9 @@ less_cnt = 0
 
 
 def add_bert_identifier(triple: str) -> str:
+    """
+    Identify fuzzy-match triples by adding identifier "BERT", in correspondance to "RELEVANCE".
+    """
     fields = triple.strip().split(', ')
     assert len(fields) == 12
     fields.insert(9, 'BERT')
@@ -22,6 +25,9 @@ def add_bert_identifier(triple: str) -> str:
 
 
 def check_duplicate(triple: str, result: List[str]) -> bool:
+    """
+    Check whether there are duplicate triples from exact match and fuzzy match
+    """
     fields = triple.strip().split(', ')
     assert len(fields) == 13
     assert fields[9] == 'BERT'
@@ -34,7 +40,7 @@ def combine_retrieval(bert_triples: List[str], rule_triples: List[str], max_num:
                       para_id: int, entity: str) -> (List[str], int, int):
     """
     Combine two sources of retrieved triples.
-    Rule: relevance-based triples in rule_triples come first, the remainings are bert_triples.
+    Rule: exact-match triples in rule_triples come first, the remainings are fuzzy-match ones.
     """
     bert_len = len(bert_triples)
     rule_len = len(rule_triples)

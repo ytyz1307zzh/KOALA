@@ -544,7 +544,7 @@ if __name__ == '__main__':
     parser.add_argument('-para_file', type=str, default='data/Paragraphs.csv', help='path to the paragraph csv')
     parser.add_argument('-state_file', type=str, default='data/State_change_annotations.csv', 
                         help='path to the state annotation csv')
-    parser.add_argument('-split_file', type=str, default='data/train_dev_test.csv', 
+    parser.add_argument('-split_file', type=str, default='data/Train_Dev_Test.csv',
                         help='path to the csv that annotates the train/dev/test split')
     parser.add_argument('-log_dir', type=str, default='logs',
                         help='directory to store the intermediate outputs')

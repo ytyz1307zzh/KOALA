@@ -57,7 +57,7 @@ def match(entity_name: str, concept_name: str) -> bool:
     entity = set(entity)
     common_words = len(concept.intersection(entity))
     total_words = len(concept.union(entity))
-    return common_words / total_words >= 0.5
+    return common_words / total_words >= 0.5  # Jaccard similarity
 
 
 
@@ -100,7 +100,6 @@ def search_triple(entity: str) -> List:
 def retrieve(datapath: str) -> (List, int):
     """
     Retrieve all possibly related triples from ConceptNet to the given entity. (rough retrieval)
-    For entities with single
     Args:
         datapath - path to the input dataset
         fout - file object to store output

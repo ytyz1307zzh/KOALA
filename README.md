@@ -11,33 +11,21 @@ AI2 released the dataset [here](https://docs.google.com/spreadsheets/d/1x5Ct8EmQ
 
 **P.S.** Please download the files in CSV format.
 
-## Requirements
+## Setup
 
-Python >= 3.7
+1. Create a virtual environment with python >= 3.7.
 
-PyTorch 1.3.1
+2. Install the dependency packages in `requirements.txt` using `setup.py`:
 
-Huggingface's Transformers 2.3.0
+   ```bash
+   pip install .
+   ```
 
-Pandas 0.25.3
+3. If you want to create your own dataset using `read_raw_dataset.py`, you also need to download the en_core_web_sm model for English language support of SpaCy:
 
-SpaCy 2.2.3
-
-[flair][https://github.com/flairNLP/flair] 0.4.4
-
-tensorboardX 1.9
-
-numpy 1.17.4
-
-[pytorch-crf][https://pytorch-crf.readthedocs.io/en/stable/] 0.7.2
-
-You may also need to download the en_core_web_sm model for English language support of SpaCy:
-
-```bash
-python -m spacy download en_core_web_sm
-```
-
-
+   ```bash
+   python -m spacy download en_core_web_sm
+   ```
 
 ## Usage
 

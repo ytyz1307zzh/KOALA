@@ -256,11 +256,11 @@ def find_relevant_triple(gold_loc_seq: List[str], gold_state_seq: List[str], ver
 
         state_token_set = None
         if state == 'C':
-            state_token_set = set(verb_dict['create'].keys())
+            state_token_set = set(verb_dict['create'])
         elif state == 'M':
-            state_token_set = set(verb_dict['move'].keys())
+            state_token_set = set(verb_dict['move'])
         elif state == 'D':
-            state_token_set = set(verb_dict['destroy'].keys())
+            state_token_set = set(verb_dict['destroy'])
 
         loc_token_set = remove_stopword(location)
         loc_token_set = set(map(stemmer.stem, loc_token_set))

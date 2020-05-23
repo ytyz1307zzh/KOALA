@@ -39,13 +39,9 @@ def extract_english(opt):
     for line in tqdm(lines):
         ls = line.split('\t')
 
+        # keep those triples with an English head concept and an English tail concept
         if ls[2].startswith('/c/en/') and ls[3].startswith('/c/en/'):
-            """
-            Some preprocessing:
-                - Remove part-of-speech encoding.
-                - Split("/")[-1] to trim the "/c/en/" and just get the entity name, convert all to 
-                - Lowercase for uniformity.
-            """
+
             rel = ls[1].split("/")[-1].lower()
             head = find_word_with_pos(ls[2]).lower()
             tail = find_word_with_pos(ls[3]).lower()
@@ -65,6 +61,7 @@ def extract_english(opt):
     fin.close()
     fout.close()
 
+    # calculate some statictics
     print('All relation types:')
     for type in set(all_rel_types):
         type_appear = all_rel_types.count(type)

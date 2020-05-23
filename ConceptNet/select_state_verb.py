@@ -27,6 +27,9 @@ STOP_VERBS = {'is', 'was', 'are', 'were', 'am', 'be', 'being', 'been', '\'s', 'h
 
 
 def count_stat(verb_dict: Dict[str, int]):
+    """
+    Calculate the statistics of the verbs.
+    """
     total_verbs = len(verb_dict)
     print(f'Total number of verbs: {total_verbs}')
     discard_list = []
@@ -52,6 +55,9 @@ def count_stat(verb_dict: Dict[str, int]):
 
 
 def update_dict(verb_dict: Dict[str, int], verbs: List[str]):
+    """
+    Update the frequency of verbs.
+    """
     for verb in verbs:
         if verb in STOP_VERBS:
             continue
@@ -63,7 +69,9 @@ def update_dict(verb_dict: Dict[str, int], verbs: List[str]):
 
 
 def select_verb_from_dataset(dataset: List[Dict]):
-
+    """
+    Collect high-frequency co-appearing verbs from the dataset
+    """
     for instance in dataset:
         gold_state_seq = instance['gold_state_seq']
         sentence_list = instance['sentence_list']
@@ -90,12 +98,8 @@ def select_verb_from_dataset(dataset: List[Dict]):
 
 def main():
     train_set = json.load(open(os.path.join(opt.data_dir, 'train.json'), 'r', encoding='utf-8'))
-    dev_set = json.load(open(os.path.join(opt.data_dir, 'dev.json'), 'r', encoding='utf-8'))
-    test_set = json.load(open(os.path.join(opt.data_dir, 'test.json'), 'r', encoding='utf-8'))
 
     select_verb_from_dataset(train_set)
-    select_verb_from_dataset(dev_set)
-    select_verb_from_dataset(test_set)
 
     print('CREATE')
     count_stat(create_verb)
@@ -104,9 +108,9 @@ def main():
     print('DESTROY')
     count_stat(destroy_verb)
 
-    result = {'create': OrderedDict(sorted(create_verb.items())),
-              'move': OrderedDict(sorted(move_verb.items())),
-              'destroy': OrderedDict(sorted(destroy_verb.items()))
+    result = {'create': sorted(create_verb.keys()),
+              'move': sorted(move_verb.keys()),
+              'destroy': sorted(destroy_verb.keys())
               }
 
     json.dump(result, open(opt.output, 'w', encoding='utf-8'), indent=4, ensure_ascii=False)
