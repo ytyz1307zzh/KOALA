@@ -34,7 +34,7 @@ parser.add_argument('-cpnet_struc_input', action='store_true', default=False,
 parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_verb_cut.json', help='path to state verb dict')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense')
-parser.add_argument('-embed_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
+parser.add_argument('-wiki_plm_path', type=str, default=None, help='specify to use pre-finetuned language model')
 parser.add_argument('-no_wiki', action='store_true', default=False, help='specify to exclude wiki')
 
 
@@ -253,7 +253,7 @@ if __name__ == "__main__":
 
     print('[INFO] Start loading trained model...')
     restore_start_time = time.time()
-    model = NCETModel(opt=opt, is_test=True)
+    model = KOALA(opt=opt, is_test=True)
     model_state_dict = torch.load(opt.restore)
     model.load_state_dict(model_state_dict)
     model.eval()

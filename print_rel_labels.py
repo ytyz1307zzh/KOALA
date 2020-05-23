@@ -23,7 +23,6 @@ parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_ve
 parser.add_argument('-batch_size', type=int, default=64)
 opt = parser.parse_args()
 opt.cpnet_struc_input = False  # add this arg to circumvent errors
-opt.wiki_path = 'wiki/result/retrieval.json'  # add this arg to circumvent errors
 
 
 def get_output(metadata: Dict, state_rel_labels: List[List[int]], loc_rel_labels: List[List[int]],

@@ -56,14 +56,14 @@ python -m spacy download en_core_web_sm
 3. Train a KOALA model:
 
    ```bash
-   python train.py -mode train -ckpt_dir ckpt -train_set data/train.json -dev_set data/dev.json -cpnet_path CPNET_PATH -cpnet_plm_path CPNET_PLM_PATH -cpnet_struc_input -state_verb STATE_VERB_PATH -embed_plm_path EMBED_PLM_PATH -finetune
+   python train.py -mode train -ckpt_dir ckpt -train_set data/train.json -dev_set data/dev.json -cpnet_path CPNET_PATH -cpnet_plm_path CPNET_PLM_PATH -cpnet_struc_input -state_verb STATE_VERB_PATH -wiki_plm_path WIKI_PLM_PATH -finetune
    ```
 
    where `-ckpt_dir` denotes the directory where checkpoints will be stored.
 
    `CPNET_PATH` should point to the retrieved ConceptNet knowledge triples. `CPNET_PLM_PATH` should point to the BERT model pre-fine-tuned on ConCeptNet triples. `STATE_VERB_PATH` should point to the co-appearance verb set of entity states. Please refer to `ConceptNet/` for detail or use my copy (see Reproducibility section below. 
 
-   `EMBED_PLM_PATH` should point to the BERT model pre-fine-tuned on Wiki paragraphs. Please refer to `wiki/` for detail or use my copy (see Reproducibility section below)
+   `WIKI_PLM_PATH` should point to the BERT model pre-fine-tuned on Wiki paragraphs. Please refer to `wiki/` for detail or use my copy (see Reproducibility section below)
 
    Some useful training arguments:
 
@@ -87,7 +87,7 @@ python -m spacy download en_core_web_sm
 4. Predict on test set using a trained model:
 
    ```bash
-   python -u train.py -mode test -test_set data/test.json -dummy_test data/dummy-predictions.tsv -output predict/prediction.tsv -cpnet_path CPNET_PATH -cpnet_plm_path CPNET_PLM_PATH -cpnet_struc_input -state_verb STATE_VERB_PATH -embed_plm_path EMBED_PLM_PATH -restore ckpt/best_checkpoint.pt
+   python -u train.py -mode test -test_set data/test.json -dummy_test data/dummy-predictions.tsv -output predict/prediction.tsv -cpnet_path CPNET_PATH -cpnet_plm_path CPNET_PLM_PATH -cpnet_struc_input -state_verb STATE_VERB_PATH -wiki_plm_path WIKI_PLM_PATH -restore ckpt/best_checkpoint.pt
    ```
 
    where -output is a TSV file that will contain the prediction results, and -dummy_test is the output template to simplify output formatting. The `dummy-predictions.tsv` file is provided by the [official evaluation script](https://github.com/allenai/aristo-leaderboard/tree/master/propara/data/test) of AI2, and I just copied it to `data/`.
@@ -119,13 +119,13 @@ To reproduce the 70.4 result on the ProPara test set, you may:
    Training:
 
    ```bash
-   python -u train.py -mode train -epoch 20 -impatience -1 -save_mode best -ckpt_dir ckpt -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -embed_plm_path MY_EMBED_PLM_MODEL -finetune -hidden_size 256 -attn_loss 0.5 -loc_loss 0.3 -per_gpu_batch_size 32 -lr 3e-5 -dropout 0.4
+   python -u train.py -mode train -epoch 20 -impatience -1 -save_mode best -ckpt_dir ckpt -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -wiki_plm_path MY_WIKI_PLM_MODEL -finetune -hidden_size 256 -attn_loss 0.5 -loc_loss 0.3 -per_gpu_batch_size 32 -lr 3e-5 -dropout 0.4
    ```
 
    Testing:
 
    ```bash
-   python -u train.py -mode test -dummy_test data/dummy-predictions.tsv -output data/prediction.tsv -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -embed_plm_path MY_EMBED_PLM_MODEL -hidden_size 256 -per_gpu_batch_size 32 -restore ckpt/best_checkpoint.pt
+   python -u train.py -mode test -dummy_test data/dummy-predictions.tsv -output data/prediction.tsv -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -wiki_plm_path MY_WIKI_PLM_MODEL -hidden_size 256 -per_gpu_batch_size 32 -restore ckpt/best_checkpoint.pt
    ```
 
    

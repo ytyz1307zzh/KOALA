@@ -71,7 +71,7 @@ parser.add_argument('-state_verb', type=str, default='ConceptNet/result/state_ve
                     help='path to co-appearance verb set of entity states')
 parser.add_argument('-cpnet_inject', choices=['state', 'location', 'both', 'none'], default='both',
                     help='where to inject ConceptNet commonsense, select "none" to avoid infusing ConceptNet')
-parser.add_argument('-embed_plm_path', type=str, default=None,
+parser.add_argument('-wiki_plm_path', type=str, default=None,
                     help='specify to use pre-fine-tuned text encoder on Wiki paragraphs')
 parser.add_argument('-finetune', action='store_true', default=False, help='if true, fine-tune the bert encoder')
 parser.add_argument('-no_wiki', action='store_true', default=False, help='if true, use the vanilla PLM from huggingface')
@@ -167,7 +167,7 @@ def train():
         print('*'*20 + '[INFO] Debug mode enabled. Switch dev set to debug.json' + '*'*20)
         dev_set = ProparaDataset('data/debug.json', opt=opt, tokenizer=plm_tokenizer, is_test=False)
 
-    model = NCETModel(opt = opt, is_test = False)
+    model = KOALA(opt = opt, is_test = False)
     if not opt.no_cuda:
         model.cuda()
         if opt.n_gpu > 1:
@@ -561,7 +561,7 @@ if __name__ == "__main__":
 
         print('[INFO] Start loading trained model...')
         restore_start_time = time.time()
-        model = NCETModel(opt = opt, is_test = True)
+        model = KOALA(opt = opt, is_test = True)
         model_state_dict = torch.load(opt.restore)
         model.load_state_dict(model_state_dict)
         model.eval()

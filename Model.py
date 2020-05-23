@@ -22,11 +22,11 @@ import argparse
 import pdb
 
 
-class NCETModel(nn.Module):
+class KOALA(nn.Module):
 
     def __init__(self, opt: argparse.Namespace, is_test: bool):
 
-        super(NCETModel, self).__init__()
+        super(KOALA, self).__init__()
         self.opt = opt
         self.hidden_size = opt.hidden_size
         self.embed_size = MODEL_HIDDEN[opt.plm_model_name]
@@ -60,10 +60,10 @@ class NCETModel(nn.Module):
         if is_test:
             self.embed_encoder = plm_model_class(config=self.plm_config)  # use saved parameters
             print(f'[INFO] Loaded an empty {opt.plm_model_name} for embedding language model during testing')
-        elif opt.embed_plm_path:
+        elif opt.wiki_plm_path:
             assert not opt.no_wiki, "Specified -no_wiki option but used a pre-fine-tuned BERT"
-            self.embed_encoder = plm_model_class.from_pretrained(opt.embed_plm_path)
-            print(f'[INFO] Loaded {opt.embed_plm_path} for embedding language model')
+            self.embed_encoder = plm_model_class.from_pretrained(opt.wiki_plm_path)
+            print(f'[INFO] Loaded {opt.wiki_plm_path} for embedding language model')
         else:
             self.embed_encoder = plm_model_class.from_pretrained(opt.plm_model_name)
             print(f'[INFO] Loaded {opt.plm_model_name} for embedding language model')
@@ -422,10 +422,10 @@ class LocationPredictor(nn.Module):
         decoder_in = decoder_in.view(batch_size * max_cands, max_sents, 4 * self.hidden_size)
         attn_probs = None
         if self.cpnet_inject in ['location', 'both']:
-            decoder_in, attn_probs = self.CpnetMemory(encoder_out=NCETModel.expand_dim_3d(encoder_out, max_cands),
+            decoder_in, attn_probs = self.CpnetMemory(encoder_out=KOALA.expand_dim_3d(encoder_out, max_cands),
                                           decoder_in=decoder_in,
-                                          entity_mask=NCETModel.expand_dim_3d(entity_mask, max_cands),
-                                          sentence_mask=NCETModel.expand_dim_3d(sentence_mask, max_cands),
+                                          entity_mask=KOALA.expand_dim_3d(entity_mask, max_cands),
+                                          sentence_mask=KOALA.expand_dim_3d(sentence_mask, max_cands),
                                           cpnet_triples=cpnet_triples,
                                           cpnet_rep=cpnet_rep,
                                           loc_mask = loc_mask)
@@ -560,8 +560,8 @@ class CpnetMemory(nn.Module):
         if loc_mask is not None:
             assert cpnet_rep.size(0) != batch_size, batch_size % cpnet_rep.size(0) == 0
             max_cands = batch_size // cpnet_rep.size(0)
-            cpnet_rep = NCETModel.expand_dim_3d(cpnet_rep, loc_cands=max_cands)
-            attn_mask = NCETModel.expand_dim_2d(attn_mask, loc_cands=max_cands)
+            cpnet_rep = KOALA.expand_dim_3d(cpnet_rep, loc_cands=max_cands)
+            attn_mask = KOALA.expand_dim_2d(attn_mask, loc_cands=max_cands)
         update_in, attn_probs = self.AttnUpdate(query=query, values=cpnet_rep, ori_input=decoder_in, attn_mask=attn_mask,
                                     ori_batch_size = ori_batch_size)
 
