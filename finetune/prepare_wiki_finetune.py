@@ -13,10 +13,8 @@ from typing import List, Dict
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-data_dir', type=str, default='../data', help='directory to the original data')
-parser.add_argument('-wiki', type=str, default='../wiki/wiki_para_50.json', help='file containing wiki data')
+parser.add_argument('-wiki', type=str, default='../wiki/wiki_para_50.json', help='the retrieved wiki paragraphs')
 parser.add_argument('-output_dir', type=str, default='../finetune_data', help='output directory')
-parser.add_argument('-add_test', default=False, action='store_true')
-parser.add_argument('-wiki_only', default=False, action='store_true', help='specify to only add wiki paragraphs into train.txt')
 opt = parser.parse_args()
 
 
@@ -35,33 +33,20 @@ def read_dataset(dataset: List[Dict]):
 
 def main():
 
-    train_set = json.load(open(os.path.join(opt.data_dir, 'train.json'), 'r', encoding='utf-8'))
-    dev_set = json.load(open(os.path.join(opt.data_dir, 'dev.json'), 'r', encoding='utf-8'))
     test_set = json.load(open(os.path.join(opt.data_dir, 'test.json'), 'r', encoding='utf-8'))
     wiki_data = json.load(open(opt.wiki, 'r', encoding='utf-8'))
     print('[INFO] Loaded {} instances from wiki file {}'.format(len(wiki_data), opt.wiki))
     train_text = []
     eval_text = []
 
-    train_paras, train_ids = read_dataset(train_set)
-    dev_paras, dev_ids = read_dataset(dev_set)
     test_paras, test_ids = read_dataset(test_set)
 
-    if not opt.wiki_only:
-        train_text.extend(train_paras * 10)
-        train_text.extend(dev_paras * 10)
-        if opt.add_test:
-            train_text.extend(test_paras * 10)
-    # eval_text.extend(train_paras)
-    # eval_text.extend(dev_paras)
     eval_text.extend(test_paras)
 
     for instance in wiki_data:
 
         para_id = instance['para_id']
         wiki_paras = instance['wiki']
-        if para_id in test_ids and not opt.add_test:
-            continue
 
         for wiki in wiki_paras:
             wiki_text = wiki['text']

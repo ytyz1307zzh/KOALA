@@ -51,9 +51,9 @@ AI2 released the dataset [here](https://docs.google.com/spreadsheets/d/1x5Ct8EmQ
 
    where `-ckpt_dir` denotes the directory where checkpoints will be stored.
 
-   `CPNET_PATH` should point to the retrieved ConceptNet knowledge triples. `CPNET_PLM_PATH` should point to the BERT model pre-fine-tuned on ConCeptNet triples. `STATE_VERB_PATH` should point to the co-appearance verb set of entity states. Please refer to `ConceptNet/` for detail or use my copy (see Reproducibility section below. 
+   `CPNET_PATH` should point to the retrieved ConceptNet knowledge triples. `CPNET_PLM_PATH` should point to the BERT model pre-fine-tuned on ConCeptNet triples. `STATE_VERB_PATH` should point to the co-appearance verb set of entity states. Please refer to `ConceptNet/` and `finetune/` for detail or use my copy (see Reproducibility section below. 
 
-   `WIKI_PLM_PATH` should point to the BERT model pre-fine-tuned on Wiki paragraphs. Please refer to `wiki/` for detail or use my copy (see Reproducibility section below)
+   `WIKI_PLM_PATH` should point to the BERT model pre-fine-tuned on Wiki paragraphs. Please refer to `wiki/` and `finetune/` for detail or use my copy (see Reproducibility section below)
 
    Some useful training arguments:
 

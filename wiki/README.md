@@ -8,5 +8,4 @@ Retrieve Wiki paragraphs from wikipedia dump using TF-IDF.
 3. Use `prepare_input.py` to format the query inputs of wiki retrieval.
 4. Use `retrieve_para.py` to retrieve top 50 wiki relevant paragraphs to each instance.
 
-P.S. DrQA modules are included in this directory.
-
+P.S. DrQA modules are included in this directory. The retrieved wiki paragraphs are stored in `wiki_para_50.json`.

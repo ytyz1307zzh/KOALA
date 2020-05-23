@@ -15,7 +15,7 @@ import random
 from transformers import BertTokenizer, PreTrainedTokenizer
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-cpnet', type=str, default='../ConceptNet/result/retrieval.json', help='file containing ConceptNet data')
+parser.add_argument('-cpnet', type=str, default='../ConceptNet/result/retrieval.json', help='the retrieved ConceptNet triples')
 parser.add_argument('-output_dir', type=str, default='../finetune_data', help='output directory')
 parser.add_argument('-add_sep', action='store_true', default=False,
                     help='specify to add <SEP> between subject, relation and object')
