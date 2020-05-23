@@ -21,7 +21,7 @@ AI2 released the dataset [here](https://docs.google.com/spreadsheets/d/1x5Ct8EmQ
    pip install .
    ```
 
-3. If you want to create your own dataset using `read_raw_dataset.py`, you also need to download the en_core_web_sm model for English language support of SpaCy:
+3. If you want to create your own dataset using `preprocess.py`, you also need to download the en_core_web_sm model for English language support of SpaCy:
 
    ```bash
    python -m spacy download en_core_web_sm
@@ -34,7 +34,7 @@ AI2 released the dataset [here](https://docs.google.com/spreadsheets/d/1x5Ct8EmQ
 2. Process the CSV data files:
 
    ```bash
-   python read_raw_dataset.py
+   python preprocess.py
    ```
 
    By default, the files should be put in `data/` and the output JSON files are also stored in `data/`. You can specify the input and output paths using optional command-line arguments. Please refer to the code for more details of command-line arguments.
@@ -96,7 +96,7 @@ AI2 released the dataset [here](https://docs.google.com/spreadsheets/d/1x5Ct8EmQ
 
 To reproduce the 70.4 result on the ProPara test set, you may:
 
-1. Use my own copy of train/dev/test data in `data/`, instead of downloading a new copy from AI2 and process it with `read_raw_dataset.py`. Although running the script would generate almost the same result, I'm sorry to say that I used the Python Set in `read_raw_dataset.py` and therefore the generated data will have a different order in **location candidates**. Although this is their only difference, it will lead to slightly different embeddings in the location predictor due to the existence of dropout technique.
+1. Use my own copy of train/dev/test data in `data/`, instead of downloading a new copy from AI2 and process it with `preprocess.py`. Although running the script would generate almost the same result, I'm sorry to say that I used the Python Set in `preprocess.py` and therefore the generated data will have a different order in **location candidates**. Although this is their only difference, it will lead to slightly different embeddings in the location predictor due to the existence of dropout technique.
 
 2. I have uploaded my retrieved ConceptNet knowledge triples, as well as the co-appearance verb set of entity states in `ConceptNet/result/`.
 

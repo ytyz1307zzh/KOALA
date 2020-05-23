@@ -20,7 +20,25 @@ The original ConceptNet knowledge base is stored in csv format, which is provide
 
 `prune_graph.py`: remove invalid triples and adjust the weights of some specific relations.
 
+`rough_retrieval.py`: extract entity-centric subgraph (all triples related to a given entity) from ConceptNet
 
+`exact_match.py`: select knowledge triples based on exact match
+
+`fuzzy_match_word.py`: sort knowledge triples based on fuzzy match scores (BERT word embeddings)
+
+`fuzzy_match_sent.py`: sort knowledge triples based on fuzzy match scores (BERT sentence embeddings). Note that this script is not used in our final model.
+
+`select_state_verb.py`: select high-frequency co-appearance verbs to state "create", "move" and "destroy" from the training set.
+
+`combine_exact_fuzzy.py`: combine the exact-match triples and fuzzy-match triples to make up at most 10 triples for each data instance.
+
+## Auxiliary Files
+
+``relation_direction.txt``: this file indicates the valid relations as well as their valid directions (for the given entity) considered in our work.
+
+`triple2sent.txt`: the rulebase of transforming knowledge triples to natural language sentences.
+
+`Stemmer.py`: The Porter Stemmer used in word stemming.
 
 
 
