@@ -36,12 +36,11 @@ Prepare data for language model fine-tuning.
 
 1. Prepare text sentences and the masked token indices at each instance:	
 
-	```bash
-python prepare_cpnet_finetune.py -cpnet ../ConceptNet/result/retrieval.json\
--output_dir ../finetune_data/ -add_sep
-	```
-	
-	The generated files are `cpnet.txt` for natural language text and `cpnet_mask.txt` for masked tokens in each instance. 
+   ```bash
+   python prepare_cpnet_finetune.py -cpnet ../ConceptNet/result/retrieval.json\
+   -output_dir ../finetune_data/ -add_sep
+   ```
+   The generated files are `cpnet.txt` for natural language text and `cpnet_mask.txt` for masked tokens in each instance. 
 
 2. Then fine-tune a BERT model using `../run_cpnet_lm.py`:
 
