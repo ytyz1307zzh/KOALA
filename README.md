@@ -113,9 +113,9 @@ To reproduce the 70.4 result on the ProPara test set, you may:
    ```bash
    python -u train.py -mode train -epoch 20 -impatience -1 -save_mode best\
    -ckpt_dir ckpt -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input\
-   -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -wiki_plm_path MY_WIKI_PLM_MODEL\
-   -finetune -hidden_size 256 -attn_loss 0.5 -loc_loss 0.3 -per_gpu_batch_size 32\
-   -lr 3e-5 -dropout 0.4
+   -cpnet_path ConceptNet/result/retrieval.json -state_verb ConceptNet/result/state_verb_cut.json\
+   -wiki_plm_path MY_WIKI_PLM_MODEL -finetune -hidden_size 256 -attn_loss 0.5 -loc_loss 0.3\
+   -per_gpu_batch_size 32 -lr 3e-5 -dropout 0.4
    ```
 
    Testing:
@@ -123,8 +123,8 @@ To reproduce the 70.4 result on the ProPara test set, you may:
    ```bash
    python -u train.py -mode test -dummy_test data/dummy-predictions.tsv\
    -output data/prediction.tsv -cpnet_plm_path MY_CPNET_PLM_MODEL -cpnet_struc_input\
-   -cpnet_path MY_CPNET_PATH -state_verb MY_STATE_VERB_PATH -wiki_plm_path MY_WIKI_PLM_MODEL\
-   -hidden_size 256 -per_gpu_batch_size 32 -restore ckpt/best_checkpoint.pt
+   -cpnet_path ConceptNet/result/retrieval.json -state_verb ConceptNet/result/state_verb_cut.json\
+   -wiki_plm_path MY_WIKI_PLM_MODEL -hidden_size 256 -per_gpu_batch_size 32 -restore ckpt/best_checkpoint.pt
    ```
 
    
