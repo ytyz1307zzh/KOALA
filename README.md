@@ -104,7 +104,7 @@ To reproduce the 70.4 result on the ProPara test set, you may:
 
 2. I have uploaded my retrieved ConceptNet knowledge triples, as well as the co-appearance verb set of entity states in `ConceptNet/result/`.
 
-3. I have uploaded my fine-tuned knowledge encoder on ConceptNet and the fine-tuned text encoder on Wiki paragraphs [here]().
+3. I have uploaded my fine-tuned knowledge encoder on ConceptNet and the fine-tuned text encoder on Wiki paragraphs [here](https://drive.google.com/drive/folders/1i0rFPx5DKUXXgoaqlyYsEHLqPonz1yWF?usp=sharing).
 
 4. Using the aforementioned input files, you will be able to reproduce the results using the following training and testing commands:
 
